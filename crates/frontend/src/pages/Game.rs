@@ -168,6 +168,14 @@ pub fn Game() -> Element {
         };
     };
 
+    // Reset news widget carousel when game changes
+    let mut news_carousel_index = use_signal(|| 0);
+    let game_id_for_effect = game.id.clone();
+    use_effect(use_reactive!(|game_id_for_effect| {
+        let _ = game_id_for_effect;
+        news_carousel_index.set(0);
+    }));
+
     let is_installed = check_game_installed(&settings_sig, &game.id, &game.biz);
     let (progress_key, get_progress_fn) = create_progress_getter(
         settings_sig,
@@ -279,7 +287,8 @@ pub fn Game() -> Element {
                 rect {
                     width: "450",
                     MyNewsWidget {
-                        game_id: game.id.clone()
+                        game_id: game.id.clone(),
+                        carousel_index: news_carousel_index,
                     }
                 }
                 
