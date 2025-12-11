@@ -1155,10 +1155,11 @@ dependencies = [
  "freya-hooks",
  "freya-router",
  "libwebp",
- "lodepng",
+ "once_cell",
  "reqwest",
  "serde",
  "serde_json",
+ "skia-safe",
  "tar",
  "tokio",
 ]
@@ -2399,18 +2400,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lodepng"
-version = "3.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77a32335d22e44238e2bb0b4d726964d18952ce1f1279ec3305305d2c61539eb"
-dependencies = [
- "crc32fast",
- "flate2",
- "libc",
- "rgb",
-]
-
-[[package]]
 name = "log"
 version = "0.4.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3363,15 +3352,6 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams",
  "web-sys",
-]
-
-[[package]]
-name = "rgb"
-version = "0.8.52"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c6a884d2998352bb4daf0183589aec883f16a6da1f4dde84d8e2e9a5409a1ce"
-dependencies = [
- "bytemuck",
 ]
 
 [[package]]

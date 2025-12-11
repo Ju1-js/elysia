@@ -1,11 +1,17 @@
 use std::sync::{Arc, RwLock};
+use std::collections::HashMap;
 
 use bytes::Bytes;
 use freya::prelude::*;
 use libwebp::WebPDecodeRGBA;
 use reqwest::{Url, header::CONTENT_TYPE};
+use skia_safe::{AlphaType, ColorType, Data, EncodedImageFormat, ImageInfo};
 
 use backend::settings::GlobalSettings;
+
+// i really hope this is correct
+static MEMORY_CACHE: once_cell::sync::Lazy<Arc<RwLock<HashMap<String, Bytes>>>> =
+    once_cell::sync::Lazy::new(|| Arc::new(RwLock::new(HashMap::new())));
 
 #[derive(Props, Clone, PartialEq)]
 pub struct MyNetworkImageProps {
@@ -52,50 +58,42 @@ pub fn MyNetworkImage(
     }: MyNetworkImageProps,
 ) -> Element {
     let focus = use_focus();
-    let mut status = use_signal(|| ImageState::Loading);
-    let mut assets_tasks = use_signal::<Vec<Task>>(Vec::new);
-
     let ctx = &dioxus::hooks::use_context::<Signal<Arc<RwLock<GlobalSettings>>>>();
 
-    let settings = ctx.read();
-    let cache_path = &settings.read().unwrap().cache_directory;
+    let cache_path = {
+        let settings = ctx.read();
+        settings.read().unwrap().cache_directory.clone()
+    };
 
     let a11y_id = focus.attribute();
-    let key = url.to_string();
-    let url = url.read();
 
-    if let Ok(asset) = cacache::read_sync(cache_path, &key) {
-        // Image loaded from cache
-        status.set(ImageState::Loaded(asset.into()));
-    } else {
-        to_owned![url, cache_path];
-        use_effect(move || {
-            // Cancel previous asset fetching requests
-            for asset_task in assets_tasks.write().drain(..) {
-                asset_task.cancel();
+    let image_resource = use_resource(move || {
+        let url_value = url.read().clone();
+        let cache_path = cache_path.clone();
+        let key = url_value.to_string();
+        
+        async move {
+            if let Some(cached_bytes) = MEMORY_CACHE.read().unwrap().get(&key) {
+                return Ok(cached_bytes.clone());
             }
 
-            // Loading image
-            to_owned![key, url, cache_path];
-            let asset_task = spawn(async move {
-                let asset = fetch_image(url).await;
-                if let Ok(asset_bytes) = asset {
-                    let _ = cacache::write_sync(cache_path, &key, &asset_bytes);
+            if let Ok(asset) = cacache::read(&cache_path, &key).await {
+                let bytes: Bytes = asset.into();
+                MEMORY_CACHE.write().unwrap().insert(key.clone(), bytes.clone());
+                return Ok(bytes);
+            }
 
-                    // Image loaded
-                    status.set(ImageState::Loaded(asset_bytes));
-                } else if let Err(_err) = asset {
-                    // Image errored
-                    status.set(ImageState::Errored);
-                }
-            });
+            let asset_bytes = fetch_image(url_value).await?;
+            let _ = cacache::write(&cache_path, &key, &asset_bytes).await;
+            MEMORY_CACHE.write().unwrap().insert(key.clone(), asset_bytes.clone());
+            Ok::<Bytes, String>(asset_bytes)
+        }
+    });
+    
+    let key_for_ui = url.read().to_string();
 
-            assets_tasks.write().push(asset_task);
-        });
-    }
-
-    match &*status.read_unchecked() {
-        ImageState::Loaded(bytes) => {
+    match &*image_resource.read_unchecked() {
+        Some(Ok(bytes)) => {
             let image_data = dynamic_bytes(bytes.clone());
             rsx! {
                 image {
@@ -109,29 +107,12 @@ pub fn MyNetworkImage(
                     a11y_name: alt,
                     aspect_ratio,
                     cover,
-                    cache_key: "{url}",
+                    cache_key: "{key_for_ui}",
                     sampling,
                 }
             }
         }
-        ImageState::Loading => {
-            if let Some(loading_element) = loading {
-                rsx! {{ loading_element }}
-            } else {
-                rsx! {
-                    rect {
-                        height,
-                        width,
-                        min_width,
-                        min_height,
-                        main_align: "center",
-                        cross_align: "center",
-                        Loader {}
-                    }
-                }
-            }
-        }
-        _ => {
+        Some(Err(_)) => {
             if let Some(fallback_element) = fallback {
                 rsx! {{ fallback_element }}
             } else {
@@ -151,10 +132,26 @@ pub fn MyNetworkImage(
                 }
             }
         }
+        None => {
+            if let Some(loading_element) = loading {
+                rsx! {{ loading_element }}
+            } else {
+                rsx! {
+                    rect {
+                        height,
+                        width,
+                        min_width,
+                        min_height,
+                        main_align: "center",
+                        cross_align: "center",
+                        Loader {}
+                    }
+                }
+            }
+        }
     }
 }
 
-#[allow(dead_code)]
 async fn fetch_image(url: Url) -> Result<Bytes, String> {
     let res = reqwest::get(url.clone())
         .await
@@ -177,23 +174,26 @@ async fn fetch_image(url: Url) -> Result<Bytes, String> {
             let (width, height, buf) =
                 WebPDecodeRGBA(&bytes).map_err(|e| format!("Failed to decode WebP image: {e}"))?;
 
-            let encoded_bytes = lodepng::encode_memory(
-                &buf,
-                width as usize,
-                height as usize,
-                lodepng::ColorType::RGBA,
-                8,
-            )
-            .map_err(|e| format!("Failed to encode PNG image: {e}"))?;
+            let info = ImageInfo::new(
+                (width as i32, height as i32),
+                ColorType::RGBA8888,
+                AlphaType::Unpremul,
+                None,
+            );
 
-            Ok(encoded_bytes.into())
+            let row_bytes = (width as usize)
+                .checked_mul(4)
+                .ok_or_else(|| "Image dimensions too large".to_string())?;
+            let data = Data::new_copy(&buf);
+            let image = skia_safe::images::raster_from_data(&info, data, row_bytes)
+                .ok_or_else(|| "Failed to create Skia image from raw data".to_string())?;
+
+            let encoded_data = image
+                .encode(None, EncodedImageFormat::PNG, None)
+                .ok_or_else(|| "Failed to encode image to PNG".to_string())?;
+
+            Ok(encoded_data.as_bytes().to_vec().into())
         }
         _ => Ok(bytes),
     }
-}
-
-enum ImageState {
-    Loading,
-    Loaded(Bytes),
-    Errored,
 }
