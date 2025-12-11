@@ -28,8 +28,8 @@ fn main() {
                 .with_size(1280.0, 720.0)
                 .with_decorations(true)
                 .with_transparency(true)
-                .with_title("Freya App")
-                .with_window_attributes(|attributes| attributes.with_resizable(false)),
+                .with_title("Elysia")
+                .with_window_attributes(|attributes| attributes.with_resizable(true)),
         ),
     );
 }
