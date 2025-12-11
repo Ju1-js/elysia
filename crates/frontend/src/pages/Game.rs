@@ -1,6 +1,5 @@
 use std::sync::{Arc, RwLock};
 use std::rc::Rc;
-
 use freya::prelude::*;
 use reqwest::Url;
 
@@ -14,55 +13,58 @@ use backend::{
     runners::Runner,
 };
 
-#[component]
-pub fn Game(game_id: String) -> Element {
-    let ctx = &use_context::<Context>();
-    let games = &ctx.api_games;
-    let settings_sig = use_context::<Signal<Arc<RwLock<GlobalSettings>>>>();
+struct CrossfadeState {
+    prev_url: Url,
+    curr_url: Url,
+    fade_progress: f64,
+}
 
-    let Some(game) = games.iter().find(|g| g.id == game_id).cloned() else {
-        return rsx! {
-            rect {
-                label {
-                    "Game not found"
-                }
-            }
-        };
+fn use_crossfade_background(url: Url) -> CrossfadeState {
+    let mut prev = use_signal(|| url.clone());
+    let mut curr = use_signal(|| url.clone());
+    
+    let anim = use_animation(|_| {
+        AnimNum::new(0.0, 1.0)
+            .time(800)
+            .ease(Ease::InOut)
+            .function(Function::Cubic)
+    });
+
+    let curr_url_str = curr.read().to_string();
+    let new_url_str = url.to_string();
+    
+    if curr_url_str != new_url_str {
+        prev.set(curr.read().clone());
+        curr.set(url.clone());
+        anim.start();
+    }
+
+    let fade_progress = if anim.is_running() {
+        anim.get().read().read() as f64
+    } else {
+        1.0
     };
 
-    let Ok(url) = game.display.background.url.parse::<Url>() else {
-        return rsx! {
-            rect {
-                label {
-                    "Cannot parse background image URL"
-                }
-            }
-        };
-    };
+    CrossfadeState {
+        prev_url: prev.read().clone(),
+        curr_url: curr.read().clone(),
+        fade_progress,
+    }
+}
 
-    let is_installed = {
-        let settings = settings_sig.read();
-        if let Ok(s) = settings.read() {
-            InstallerManager::is_game_installed(
-                &s,
-                &game_id,
-                &game.biz,
-                s.temp_directory.clone(),
-                s.components_directory.clone(),
-            )
-        } else {
-            false
-        }
-    };
-
+fn create_progress_getter(
+    settings_sig: &Signal<Arc<RwLock<GlobalSettings>>>,
+    game_id: &str,
+    biz: &str,
+) -> (String, Rc<dyn Fn(&str) -> Option<DownloadProgress>>) {
     let progress_key = format!("{}_streaming", game_id);
-
+    
     let installer = {
         let settings = settings_sig.read();
         if let Ok(s) = settings.read() {
             InstallerManager::create_installer(
-                &game.id,
-                &game.biz,
+                game_id,
+                biz,
                 s.temp_directory.clone(),
                 s.components_directory.clone(),
             )
@@ -71,7 +73,7 @@ pub fn Game(game_id: String) -> Element {
         }
     };
 
-    let get_progress_fn: Rc<dyn Fn(&str) -> Option<DownloadProgress>> = Rc::new(move |key: &str| {
+    let get_progress_fn = Rc::new(move |key: &str| {
         installer.as_ref()?.get_progress(key).map(|p| DownloadProgress {
             downloaded: p.downloaded,
             total: p.total,
@@ -83,126 +85,156 @@ pub fn Game(game_id: String) -> Element {
         })
     });
 
-    let onpress = {
-        let mut settings_sig_copy = settings_sig;
-        let game_id_clone = game.id.clone();
-        let biz = game.biz.clone();
+    (progress_key, get_progress_fn)
+}
 
-        move |_| {
-            let binding = settings_sig_copy.write();
-            let installer = binding.write().map(|settings| {
-                if let Some(installed_game) = settings.installed_games.get(&game_id_clone) {
-                    if let Err(e) = installed_game.runner.run_game(&settings, installed_game) {
-                        eprintln!("Error running game: {}", e);
-                    }
-                    return None;
+fn create_game_action_handler(
+    mut settings_sig: Signal<Arc<RwLock<GlobalSettings>>>,
+    game_id: String,
+    biz: String,
+) -> EventHandler<PressEvent> {
+    EventHandler::new(move |_| {
+        let settings = settings_sig.write();
+        
+        let installer = settings.write().ok().and_then(|settings| {
+            if let Some(installed_game) = settings.installed_games.get(&game_id) {
+                if let Err(e) = installed_game.runner.run_game(&settings, installed_game) {
+                    eprintln!("Failed to run game: {}", e);
                 }
-                
-                Some(InstallerManager::create_installer(
-                    &game_id_clone,
-                    &biz,
-                    settings.temp_directory.clone(),
-                    settings.components_directory.clone(),
-                ))
-            }).ok().flatten().flatten();
-            
-            if let Some(inst) = installer {
-                let arc : &Arc<RwLock<GlobalSettings>> = &binding;
-                InstallerManager::spawn_install(arc.clone(), inst, game_id_clone.clone());
+                return None;
             }
+
+            InstallerManager::create_installer(
+                &game_id,
+                &biz,
+                settings.temp_directory.clone(),
+                settings.components_directory.clone(),
+            )
+        });
+
+        if let Some(inst) = installer {
+            InstallerManager::spawn_install(
+                settings.clone(),
+                inst,
+                game_id.clone(),
+            );
         }
+    })
+}
+
+fn check_game_installed(
+    settings_sig: &Signal<Arc<RwLock<GlobalSettings>>>,
+    game_id: &str,
+    biz: &str,
+) -> bool {
+    let settings = settings_sig.read();
+    if let Ok(s) = settings.read() {
+        InstallerManager::is_game_installed(
+            &s,
+            game_id,
+            biz,
+            s.temp_directory.clone(),
+            s.components_directory.clone(),
+        )
+    } else {
+        false
+    }
+}
+
+#[component]
+pub fn Game() -> Element {
+    let selected_game_id = use_context::<Signal<Option<String>>>();
+    let ctx = use_context::<Context>();
+    let settings_sig = use_context::<Signal<Arc<RwLock<GlobalSettings>>>>();
+
+    let game_id = selected_game_id.read();
+    let Some(ref game_id_str) = *game_id else {
+        return rsx! { rect { width: "fill", height: "fill" } };
     };
+
+    let Some(game) = ctx.api_games.iter().find(|g| &g.id == game_id_str).cloned() else {
+        return rsx! { 
+            rect { 
+                width: "fill",
+                height: "fill",
+                label { "Game not found" }
+            }
+        };
+    };
+
+    let Ok(url) = game.display.background.url.parse::<Url>() else {
+        return rsx! {
+            rect {
+                width: "fill",
+                height: "fill",
+                label { "Invalid background image URL" }
+            }
+        };
+    };
+
+    let is_installed = check_game_installed(&settings_sig, &game.id, &game.biz);
+    let (progress_key, get_progress_fn) = create_progress_getter(&settings_sig, &game.id, &game.biz);
+    let onpress = create_game_action_handler(settings_sig, game.id.clone(), game.biz.clone());
+    let crossfade = use_crossfade_background(url);
 
     rsx! {
         rect {
             width: "fill",
             height: "fill",
-
-            rect { // Background
+            
+            // Previous background
+            rect {
                 position: "absolute",
                 position_top: "0",
                 position_left: "0",
-                cross_align: "end",
-                main_align: "end",
                 width: "100%",
                 height: "100%",
+                main_align: "end",
+                cross_align: "end",
                 layer: "1",
-
+                opacity: "{1.0 - crossfade.fade_progress}",
                 MyNetworkImage {
-                    url: url.clone(),
+                    url: crossfade.prev_url,
                     sampling: "trilinear",
                 }
-
-                rect { // Background bullshit
-                    position: "absolute",
-                    position_top: "0",
-                    position_left: "0",
-                    cross_align: "start",
-                    main_align: "start",
-                    width: "100%",
-                    height: "100%",
-                    layer: "1",
-
-                    MyNetworkImage {
-                        url: url,
-                        sampling: "nearest",
-                    }
-                },
-            },
-
-            rect { // Bottom Left
-                position: "absolute",
-                position_top: "0",
-                position_left: "96",
-                width: "100%",
-                height: "100%",
-                direction: "horizontal",
-                main_align: "start",
-                cross_align: "end",
-                padding: "32",
-                rect {
-                    width: "500",
-                    spacing: "32",
-
-                    MyNewsWidget {
-                        game_id: game.id
-                    },
-
-                    DownloadControl {
-                        game_id: game_id.clone(),
-                        progress_key: progress_key,
-                        installed: is_installed,
-                        get_progress: get_progress_fn,
-                        accent_color: "#ff9500".to_string(),
-                        onpress: onpress,
-                    },
-                }
-            },
-            rect { // Bottom Right
+            }
+            
+            // Current background
+            rect {
                 position: "absolute",
                 position_top: "0",
                 position_left: "0",
                 width: "100%",
                 height: "100%",
-                direction: "horizontal",
                 main_align: "end",
                 cross_align: "end",
-                spacing: "20",
-                padding: "32",
-
-                MyButton {
-                    onpress: move |_| println!("Button Pressed!"),
-                    rect {
-                        font_size: "32",
-                        direction: "horizontal",
-                        cross_align: "center",
-                        spacing: "8",
-                        padding: "4",
-                        label { "Meow" }
-                    }
+                layer: "1",
+                opacity: "{crossfade.fade_progress}",
+                MyNetworkImage {
+                    url: crossfade.curr_url.clone(),
+                    sampling: "trilinear",
                 }
-            },
-            rect { // Top Right
+            }
+            
+            // Blur layer
+            rect {
+                position: "absolute",
+                position_top: "0",
+                position_left: "0",
+                width: "100%",
+                height: "100%",
+                main_align: "start",
+                cross_align: "start",
+                layer: "2",
+                opacity: "{crossfade.fade_progress}",
+                MyNetworkImage {
+                    url: crossfade.curr_url,
+                    sampling: "trilinear",
+                }
+            }
+            
+            // Top right buttons
+            rect {
                 position: "absolute",
                 position_top: "0",
                 position_left: "0",
@@ -213,19 +245,112 @@ pub fn Game(game_id: String) -> Element {
                 cross_align: "start",
                 spacing: "20",
                 padding: "32",
-
+                layer: "-1",
+                
                 MyButton {
-                    onpress: move |_| println!("Button Pressed!"),
+                    onpress: move |_| println!("Meow clicked!"),
                     rect {
-                        font_size: "32",
                         direction: "horizontal",
                         cross_align: "center",
                         spacing: "8",
-                        padding: "4",
-                        label { "Explode" }
+                        label {
+                            font_size: "16",
+                            font_weight: "500",
+                            color: "white",
+                            "Meow 🐾"
+                        }
                     }
                 }
             }
+            
+            rect {
+                position: "absolute",
+                position_top: "0",
+                position_left: "92",
+                width: "550",
+                height: "100%",
+                direction: "vertical",
+                main_align: "end",
+                cross_align: "start",
+                padding: "40",
+                spacing: "20",
+                layer: "-1",
+                
+                rect {
+                    width: "450",
+                    MyNewsWidget {
+                        game_id: game.id.clone()
+                    }
+                }
+                
+                DownloadControl {
+                    game_id: game.id.clone(),
+                    progress_key: progress_key,
+                    installed: is_installed,
+                    get_progress: get_progress_fn,
+                    accent_color: "#ff9500".to_string(),
+                    onpress: onpress,
+                }
+            }
+                
+            rect {
+                position: "absolute",
+                position_top: "0",
+                position_left: "0",
+                width: "100%",
+                height: "100%",
+                direction: "horizontal",
+                main_align: "end",
+                cross_align: "end",
+                spacing: "12",
+                padding: "32",
+                
+                MyButton {
+                    onpress: move |_| println!("Game tracker clicked!"),
+                    rect {
+                        direction: "horizontal",
+                        cross_align: "center",
+                        spacing: "8",
+                        
+                        svg {
+                            width: "20",
+                            height: "20",
+                            svg_content: r#"<svg viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.5-13H11v6l5.2 3.2.8-1.3-4.5-2.7V7z"/>
+                            </svg>"#
+                        }
+                        label {
+                            font_size: "16",
+                            font_weight: "500",
+                            color: "white",
+                            "2h 34m"
+                        }
+                    }
+                }
+                
+                MyButton {
+                    onpress: move |_| println!("Game settings clicked!"),
+                    rect {
+                        direction: "horizontal",
+                        cross_align: "center",
+                        spacing: "8",
+                        svg {
+                            width: "20",
+                            height: "20",
+                            svg_content: r#"<svg viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97 0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1 0 .33.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66z"/>
+                            </svg>"#
+                        }
+                        label {
+                            font_size: "16",
+                            font_weight: "500",
+                            color: "white",
+                            "Game Settings"
+                        }
+                    }
+                }
+            }
+
         }
     }
 }

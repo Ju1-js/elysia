@@ -5,11 +5,13 @@ use freya::prelude::*;
 pub fn MySidebarItem(
     /// Inner content for the SidebarItem.
     children: Element,
+    /// Whether this sidebar item is currently active.
+    #[props(default = false)]
+    is_active: bool,
 ) -> Element {
     let font_theme = use_applied_theme!(None, sidebar_item).font_theme;
     let mut status = use_signal(ButtonStatus::default);
     let platform = use_platform();
-    let is_active = use_activable_route();
 
     use_drop(move || {
         if *status.read() == ButtonStatus::Hovering {
@@ -27,11 +29,12 @@ pub fn MySidebarItem(
         status.set(ButtonStatus::default());
     };
 
-    let background = "rgb(34,34,34,.1)";
-    let hover_background = "rgb(34,34,34,.4)";
+    let background = "rgb(255,255,255,.02)";
+    let hover_background = "rgb(255,255,255,.12)";
+    let active_background = "rgb(255,255,255,.18)";
 
     let background = match *status.read() {
-        _ if is_active => hover_background,
+        _ if is_active => active_background,
         ButtonStatus::Hovering => hover_background,
         ButtonStatus::Idle => background,
     };
@@ -39,15 +42,16 @@ pub fn MySidebarItem(
     rsx! {
         rect {
             overflow: "clip",
-            margin: "0",
+            margin: "2 0",
             onmouseenter,
             onmouseleave,
             width: "auto",
             height: "auto",
             color: "{font_theme.color}",
-            corner_radius: "8",
-            padding: "8",
+            corner_radius: "10",
+            padding: "6",
             background: "{background}",
+            shadow: "0 2 8 0 rgb(0, 0, 0, 40)",
             {children}
         }
     }
