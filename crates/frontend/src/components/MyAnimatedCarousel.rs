@@ -2,8 +2,16 @@ use freya::{core::custom_attributes::NodeReferenceLayout, prelude::*};
 
 use crate::components::Expand;
 
+#[derive(Props, Clone, PartialEq)]
+pub struct MyAnimatedCarouselProps {
+    pub items: Vec<Element>,
+    #[props(optional)]
+    pub selected: Option<Signal<usize>>,
+}
+
 #[component]
-pub fn MyAnimatedCarousel(items: Vec<Element>) -> Element {
+pub fn MyAnimatedCarousel(props: MyAnimatedCarouselProps) -> Element {
+    let MyAnimatedCarouselProps { items, selected } = props;
     let (reference, node_size) = use_node_signal();
     let mut state = use_signal(|| CarouselState::Stopped(0));
 
@@ -17,8 +25,14 @@ pub fn MyAnimatedCarousel(items: Vec<Element>) -> Element {
             CarouselState::Stopped(index) => {
                 if direction > 0.0 && index < len - 1 {
                     *state.write() = CarouselState::Running(index, index + 1);
+                    if let Some(mut sel) = selected {
+                        *sel.write() = index + 1;
+                    }
                 } else if direction < 0.0 && index > 0 {
                     *state.write() = CarouselState::Running(index, index - 1);
+                    if let Some(mut sel) = selected {
+                        *sel.write() = index - 1;
+                    }
                 }
             }
             CarouselState::Running(_, _) => {}
@@ -42,7 +56,7 @@ fn Carousel(
 ) -> Element {
     let animation = use_animation(move |_conf| {
         AnimNum::new(1.0, 0.0)
-            .time(300)
+            .time(250)
             .ease(Ease::Out)
             .function(Function::Cubic)
     });
@@ -66,8 +80,7 @@ fn Carousel(
         };
     });
 
-    let offset = animation.get().read().read();
-    let width = node_size.read().area.width();
+    let opacity = animation.get().read().read();
 
     rsx!(
         rect {
@@ -101,22 +114,30 @@ fn Carousel(
                             }
                         }
                         CarouselState::Running(from, to) => {
-                            let direction = to as f32 - from as f32;
-                            let offset_x = (offset * width) * direction.signum() - width;
                             let from = if from >= items.len() {0} else {from};
                             let to = if to >= items.len() {0} else {to};
 
                             rsx! {
                                 rect {
                                     width: "100%",
-                                    {&items[from]}
-                                }
-
-                                rect {
-                                    width: "100%",
-                                    offset_x: "{offset_x}",
-
-                                    {&items[to]}
+                                    position: "relative",
+                                    
+                                    // Fade in
+                                    rect {
+                                        width: "100%",
+                                        opacity: "{1.0 - opacity}",
+                                        {&items[to]}
+                                    }
+                                    
+                                    // Fade out
+                                    rect {
+                                        width: "100%",
+                                        position: "absolute",
+                                        position_top: "0",
+                                        position_left: "0",
+                                        opacity: "{opacity}",
+                                        {&items[from]}
+                                    }
                                 }
                             }
                         }
