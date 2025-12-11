@@ -25,7 +25,7 @@ fn use_crossfade_background(url: Url) -> CrossfadeState {
     
     let anim = use_animation(|_| {
         AnimNum::new(0.0, 1.0)
-            .time(800)
+            .time(700)
             .ease(Ease::InOut)
             .function(Function::Cubic)
     });
