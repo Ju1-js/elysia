@@ -53,28 +53,24 @@ fn use_crossfade_background(url: Url) -> CrossfadeState {
 }
 
 fn create_progress_getter(
-    settings_sig: &Signal<Arc<RwLock<GlobalSettings>>>,
-    game_id: &str,
-    biz: &str,
+    settings_sig: Signal<Arc<RwLock<GlobalSettings>>>,
+    game_id: String,
+    biz: String,
 ) -> (String, Rc<dyn Fn(&str) -> Option<DownloadProgress>>) {
     let progress_key = format!("{}_streaming", game_id);
     
-    let installer = {
-        let settings = settings_sig.read();
-        if let Ok(s) = settings.read() {
-            InstallerManager::create_installer(
-                game_id,
-                biz,
-                s.temp_directory.clone(),
-                s.components_directory.clone(),
-            )
-        } else {
-            None
-        }
-    };
-
     let get_progress_fn = Rc::new(move |key: &str| {
-        installer.as_ref()?.get_progress(key).map(|p| DownloadProgress {
+        let settings = settings_sig.read();
+        let s = settings.read().ok()?;
+        
+        let installer = InstallerManager::create_installer(
+            &game_id,
+            &biz,
+            s.temp_directory.clone(),
+            s.components_directory.clone(),
+        )?;
+        
+        installer.get_progress(key).map(|p| DownloadProgress {
             downloaded: p.downloaded,
             total: p.total,
             mb_s: p.mb_s,
@@ -173,7 +169,11 @@ pub fn Game() -> Element {
     };
 
     let is_installed = check_game_installed(&settings_sig, &game.id, &game.biz);
-    let (progress_key, get_progress_fn) = create_progress_getter(&settings_sig, &game.id, &game.biz);
+    let (progress_key, get_progress_fn) = create_progress_getter(
+        settings_sig,
+        game.id.clone(),
+        game.biz.clone()
+    );
     let onpress = create_game_action_handler(settings_sig, game.id.clone(), game.biz.clone());
     let crossfade = use_crossfade_background(url);
 
