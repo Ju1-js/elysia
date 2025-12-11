@@ -5,6 +5,7 @@ use reqwest::Url;
 
 use crate::{
     components::{DownloadControl, DownloadProgress, MyButton, MyNetworkImage, MyNewsWidget},
+    pages::GameSettings,
     context::Context,
 };
 use backend::{
@@ -142,6 +143,7 @@ pub fn Game() -> Element {
     let selected_game_id = use_context::<Signal<Option<String>>>();
     let ctx = use_context::<Context>();
     let settings_sig = use_context::<Signal<Arc<RwLock<GlobalSettings>>>>();
+    let mut current_page = use_signal(|| "game");
 
     let game_id = selected_game_id.read();
     let Some(ref game_id_str) = *game_id else {
@@ -157,6 +159,17 @@ pub fn Game() -> Element {
             }
         };
     };
+
+    // Show settings page if selected
+    if *current_page.read() == "game" {
+        // Show game page
+    } else {
+        return rsx! {
+            GameSettings {
+                on_back: move |_| current_page.set("game"),
+            }
+        };
+    }
 
     let Ok(url) = game.display.background.url.parse::<Url>() else {
         return rsx! {
@@ -338,7 +351,7 @@ pub fn Game() -> Element {
                 }
                 
                 MyButton {
-                    onpress: move |_| println!("Game settings clicked!"),
+                    onpress: move |_| current_page.set("settings"),
                     rect {
                         direction: "horizontal",
                         cross_align: "center",
