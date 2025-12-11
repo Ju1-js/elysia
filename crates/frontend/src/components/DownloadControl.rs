@@ -115,24 +115,27 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
             rsx!(
                 rect {
                     width: "100%",
-                    padding: "12",
-                    corner_radius: "8",
-                    background: "#00000058",
+                    padding: "16",
+                    corner_radius: "12",
+                    background: "#00000078",
                     border: "1 inner {border_fill}",
                     direction: "vertical",
-                    spacing: "6",
+                    spacing: "10",
+                    shadow: "0 2 12 0 rgb(0, 0, 0, 40)",
+                    backdrop_blur: "16",
                     
                     // Progress bar
                     rect {
                         width: "100%",
-                        height: "24",
-                        background: "{border_fill}",
-                        corner_radius: "4",
+                        height: "6",
+                        background: "rgb(40,40,40)",
+                        corner_radius: "3",
+                        overflow: "clip",
                         rect {
                             width: "{bar_width}",
-                            height: "24",
+                            height: "6",
                             background: "{accent_color}",
-                            corner_radius: "4",
+                            corner_radius: "3",
                         }
                     }
                     
@@ -144,11 +147,13 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
                         cross_align: "center",
                         label {
                             color: "{font_theme.color}",
+                            font_size: "14",
                             "{label_text}"
                         }
                         label {
                             color: "{font_theme.color}",
-                            font_size: "12",
+                            font_size: "14",
+                            font_weight: "600",
                             "{pct_text}"
                         }
                     }
@@ -180,17 +185,21 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
             {
                 if !is_busy {
                     rsx!(
-                        crate::components::MyButton {
-                            onpress: onpress,
-                            rect {
-                                font_size: "24",
-                                width: "100%",
-                                direction: "horizontal",
-                                cross_align: "center",
-                                main_align: "start",
-                                padding: "4",
-                                label {
-                                    "{button_label}"
+                        rect {
+                            width: "100%",
+                            direction: "horizontal",
+                            main_align: "start",
+                            crate::components::MyButton {
+                                onpress: onpress,
+                                rect {
+                                    direction: "horizontal",
+                                    cross_align: "center",
+                                    main_align: "center",
+                                    label {
+                                        font_size: "16",
+                                        font_weight: "500",
+                                        "{button_label}"
+                                    }
                                 }
                             }
                         }

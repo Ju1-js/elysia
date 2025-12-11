@@ -26,13 +26,13 @@ pub fn MyButton(props: MyButtonProps) -> Element {
     } = props;
 
     let ButtonTheme {
-        background,
-        hover_background,
-        disabled_background,
+        background: _,
+        hover_background: _,
+        disabled_background: _,
         border_fill,
         focus_border_fill,
-        padding,
-        margin,
+        padding: _,
+        margin: _,
         corner_radius: _,
         width,
         height,
@@ -96,11 +96,6 @@ pub fn MyButton(props: MyButtonProps) -> Element {
     };
 
     let a11y_focusable = if enabled { "true" } else { "false" };
-    let background = match *status.read() {
-        _ if !enabled => disabled_background,
-        ButtonStatus::Hovering => hover_background,
-        ButtonStatus::Idle => background,
-    };
     let border = if focus.is_focused_with_keyboard() {
         format!("2 inner {focus_border_fill}")
     } else {
@@ -116,21 +111,23 @@ pub fn MyButton(props: MyButtonProps) -> Element {
             a11y_id,
             width: "{width}",
             height: "{height}",
-            padding: "{padding}",
-            margin: "{margin}",
+            padding: "12 24",
+            margin: "4",
             overflow: "clip",
             a11y_role:"button",
             a11y_focusable,
             color: "{font_theme.color}",
-            shadow: "2 2 5 6 rgb(0, 0, 0, 30)",
+            shadow: "0 4 16 0 rgb(0, 0, 0, 70)",
             border,
-            corner_radius: "99",
-            background: "{background}",
-            background_opacity: "0.6",
+            corner_radius: "8",
+            background: "rgb(20, 20, 20)",
+            background_opacity: "0.7",
             text_height: "disable-least-ascent",
             main_align: "center",
             cross_align: "center",
-            backdrop_blur: "16",
+            backdrop_blur: "32",
+            font_size: "16",
+            font_weight: "500",
 
             {&children}
         }
