@@ -160,17 +160,6 @@ pub fn Game() -> Element {
         };
     };
 
-    // Show settings page if selected
-    if *current_page.read() == "game" {
-        // Show game page
-    } else {
-        return rsx! {
-            GameSettings {
-                on_back: move |_| current_page.set("game"),
-            }
-        };
-    }
-
     let Ok(url) = game.display.background.url.parse::<Url>() else {
         return rsx! {
             rect {
@@ -198,12 +187,23 @@ pub fn Game() -> Element {
     let onpress = create_game_action_handler(settings_sig, game.id.clone(), game.biz.clone());
     let crossfade = use_crossfade_background(url);
 
+    // Show settings page if selected
+    if *current_page.read() != "game" {
+        return rsx! {
+            GameSettings {
+                on_back: move |_| current_page.set("game"),
+                background_url: crossfade.curr_url.clone(),
+                game_name: game.display.name.clone(),
+            }
+        };
+    }
+
     rsx! {
         rect {
             width: "fill",
             height: "fill",
             
-            // Previous background
+            // Previous background (right-aligned, crossfades out)
             rect {
                 position: "absolute",
                 position_top: "0",
@@ -212,7 +212,7 @@ pub fn Game() -> Element {
                 height: "100%",
                 main_align: "end",
                 cross_align: "end",
-                layer: "1",
+                layer: "2",
                 opacity: "{1.0 - crossfade.fade_progress}",
                 MyNetworkImage {
                     url: crossfade.prev_url,
@@ -220,7 +220,7 @@ pub fn Game() -> Element {
                 }
             }
             
-            // Current background
+            // Current background (right-aligned, crossfades in)
             rect {
                 position: "absolute",
                 position_top: "0",
@@ -229,7 +229,7 @@ pub fn Game() -> Element {
                 height: "100%",
                 main_align: "end",
                 cross_align: "end",
-                layer: "1",
+                layer: "2",
                 opacity: "{crossfade.fade_progress}",
                 MyNetworkImage {
                     url: crossfade.curr_url.clone(),
@@ -237,7 +237,7 @@ pub fn Game() -> Element {
                 }
             }
             
-            // Blur layer
+            // Blur layer (static, doesn't crossfade)
             rect {
                 position: "absolute",
                 position_top: "0",
@@ -246,10 +246,9 @@ pub fn Game() -> Element {
                 height: "100%",
                 main_align: "start",
                 cross_align: "start",
-                layer: "2",
-                opacity: "{crossfade.fade_progress}",
+                layer: "3",
                 MyNetworkImage {
-                    url: crossfade.curr_url,
+                    url: crossfade.curr_url.clone(),
                     sampling: "trilinear",
                 }
             }

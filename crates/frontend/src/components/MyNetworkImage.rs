@@ -9,35 +9,23 @@ use skia_safe::{AlphaType, ColorType, Data, EncodedImageFormat, ImageInfo};
 
 use backend::settings::GlobalSettings;
 
-// i really hope this is correct
 static MEMORY_CACHE: once_cell::sync::Lazy<Arc<RwLock<HashMap<String, Bytes>>>> =
     once_cell::sync::Lazy::new(|| Arc::new(RwLock::new(HashMap::new())));
 
 #[derive(Props, Clone, PartialEq)]
 pub struct MyNetworkImageProps {
-    /// Width of the image container. Default to `auto`.
     #[props(default = "auto".into())]
     pub width: String,
-    /// Height of the image container. Default to `auto`.
     #[props(default = "auto".into())]
     pub height: String,
-    /// Min width of the image container.
     pub min_width: Option<String>,
-    /// Min height of the image container.
     pub min_height: Option<String>,
-    /// URL of the image.
     pub url: ReadOnlySignal<Url>,
-    /// Fallback element.
     pub fallback: Option<Element>,
-    /// Loading element.
     pub loading: Option<Element>,
-    /// Information about the image.
     pub alt: Option<String>,
-    /// Aspect ratio of the image.
     pub aspect_ratio: Option<String>,
-    /// Cover of the image.
     pub cover: Option<String>,
-    /// Image sampling algorithm.
     pub sampling: Option<String>,
 }
 
@@ -58,35 +46,51 @@ pub fn MyNetworkImage(
     }: MyNetworkImageProps,
 ) -> Element {
     let focus = use_focus();
-    let ctx = &dioxus::hooks::use_context::<Signal<Arc<RwLock<GlobalSettings>>>>();
+    let ctx = use_context::<Signal<Arc<RwLock<GlobalSettings>>>>();
 
-    let cache_path = {
+    // Use Arc to avoid cloning the entire path
+    let cache_path = use_memo(move || {
         let settings = ctx.read();
-        settings.read().unwrap().cache_directory.clone()
-    };
+        Arc::new(settings.read().unwrap().cache_directory.clone())
+    });
 
     let a11y_id = focus.attribute();
 
     let image_resource = use_resource(move || {
         let url_value = url.read().clone();
-        let cache_path = cache_path.clone();
+        let cache_path = cache_path.read().clone();
         let key = url_value.to_string();
         
         async move {
-            if let Some(cached_bytes) = MEMORY_CACHE.read().unwrap().get(&key) {
-                return Ok(cached_bytes.clone());
+            // Check memory cache first
+            if let Some(cached_bytes) = MEMORY_CACHE.read().unwrap().get(&key).cloned() {
+                return Ok(cached_bytes);
             }
 
-            if let Ok(asset) = cacache::read(&cache_path, &key).await {
-                let bytes: Bytes = asset.into();
-                MEMORY_CACHE.write().unwrap().insert(key.clone(), bytes.clone());
-                return Ok(bytes);
-            }
+            // Try disk cache, if it fails, fetch from network
+            let bytes = match cacache::read(&*cache_path, &key).await {
+                Ok(asset) => {
+                    let bytes: Bytes = asset.into();
+                    // Populate memory cache from disk
+                    MEMORY_CACHE.write().unwrap().insert(key.clone(), bytes.clone());
+                    bytes
+                }
+                Err(_) => {
+                    // Fetch from network
+                    let asset_bytes = fetch_image(url_value).await?;
+                    
+                    // Write to disk cache (log errors instead of silently ignoring)
+                    if let Err(e) = cacache::write(&*cache_path, &key, &asset_bytes).await {
+                        eprintln!("Failed to write to disk cache for {}: {}", key, e);
+                    }
+                    
+                    // Populate memory cache
+                    MEMORY_CACHE.write().unwrap().insert(key.clone(), asset_bytes.clone());
+                    asset_bytes
+                }
+            };
 
-            let asset_bytes = fetch_image(url_value).await?;
-            let _ = cacache::write(&cache_path, &key, &asset_bytes).await;
-            MEMORY_CACHE.write().unwrap().insert(key.clone(), asset_bytes.clone());
-            Ok::<Bytes, String>(asset_bytes)
+            Ok::<Bytes, String>(bytes)
         }
     });
     
@@ -126,7 +130,7 @@ pub fn MyNetworkImage(
                         cross_align: "center",
                         label {
                             text_align: "center",
-                            "Error"
+                            "Error loading image"
                         }
                     }
                 }
@@ -167,33 +171,38 @@ async fn fetch_image(url: Url) -> Result<Bytes, String> {
     let bytes = res
         .bytes()
         .await
-        .map_err(|e| format!("Failed to fetch image: {e}"))?;
+        .map_err(|e| format!("Failed to read image bytes: {e}"))?;
 
-    match content_type.as_str() {
-        "image/webp" => {
-            let (width, height, buf) =
-                WebPDecodeRGBA(&bytes).map_err(|e| format!("Failed to decode WebP image: {e}"))?;
-
-            let info = ImageInfo::new(
-                (width as i32, height as i32),
-                ColorType::RGBA8888,
-                AlphaType::Unpremul,
-                None,
-            );
-
-            let row_bytes = (width as usize)
-                .checked_mul(4)
-                .ok_or_else(|| "Image dimensions too large".to_string())?;
-            let data = Data::new_copy(&buf);
-            let image = skia_safe::images::raster_from_data(&info, data, row_bytes)
-                .ok_or_else(|| "Failed to create Skia image from raw data".to_string())?;
-
-            let encoded_data = image
-                .encode(None, EncodedImageFormat::PNG, None)
-                .ok_or_else(|| "Failed to encode image to PNG".to_string())?;
-
-            Ok(encoded_data.as_bytes().to_vec().into())
-        }
-        _ => Ok(bytes),
+    // Only transcode WebP, pass through other formats
+    if content_type == "image/webp" {
+        transcode_webp_to_png(&bytes)
+    } else {
+        Ok(bytes)
     }
+}
+
+fn transcode_webp_to_png(bytes: &[u8]) -> Result<Bytes, String> {
+    let (width, height, buf) = WebPDecodeRGBA(bytes)
+        .map_err(|e| format!("Failed to decode WebP image: {e}"))?;
+
+    let info = ImageInfo::new(
+        (width as i32, height as i32),
+        ColorType::RGBA8888,
+        AlphaType::Unpremul,
+        None,
+    );
+
+    let row_bytes = (width as usize)
+        .checked_mul(4)
+        .ok_or_else(|| "Image dimensions too large".to_string())?;
+    
+    let data = Data::new_copy(&buf);
+    let image = skia_safe::images::raster_from_data(&info, data, row_bytes)
+        .ok_or_else(|| "Failed to create Skia image from raw data".to_string())?;
+
+    let encoded_data = image
+        .encode(None, EncodedImageFormat::PNG, None)
+        .ok_or_else(|| "Failed to encode image to PNG".to_string())?;
+
+    Ok(encoded_data.as_bytes().to_vec().into())
 }
