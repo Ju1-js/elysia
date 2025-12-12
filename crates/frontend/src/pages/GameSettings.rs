@@ -55,7 +55,6 @@ pub fn GameSettings(
             width: "fill",
             height: "fill",
             
-            // Blurred background image
             rect {
                 position: "absolute",
                 position_top: "0",
@@ -64,14 +63,13 @@ pub fn GameSettings(
                 height: "100%",
                 main_align: "end",
                 cross_align: "end",
-                layer: "-1",
-                shadow: "0 0 100 100 rgb(0, 0, 0)",
+                layer: "2",
                 MyNetworkImage {
                     url: background_url.clone(),
                     sampling: "trilinear",
                 }
             }
-
+            
             rect {
                 position: "absolute",
                 position_top: "0",
@@ -80,27 +78,57 @@ pub fn GameSettings(
                 height: "100%",
                 main_align: "start",
                 cross_align: "start",
-                layer: "-1",
-                shadow: "0 0 100 100 rgb(0, 0, 0)",
+                layer: "3",
                 MyNetworkImage {
                     url: background_url,
                     sampling: "trilinear",
                 }
             }
             
-            // Dark overlay for better readability
+            rect {
+                position: "absolute",
+                position_top: "0",
+                position_left: "80",
+                width: "fill",
+                height: "100%",
+                backdrop_blur: "24",
+                background: "rgb(20, 20, 25, 0.7)",
+                layer: "-1",
+            }
+            
             rect {
                 position: "absolute",
                 position_top: "0",
                 position_left: "0",
                 width: "100%",
                 height: "100%",
-                background: "rgb(0, 0, 0)",
-                opacity: "0.7",
+                direction: "horizontal",
+                main_align: "end",
+                cross_align: "end",
+                spacing: "20",
+                padding: "32",
                 layer: "-1",
+                
+                MyButton {
+                    onpress: move |event| {
+                        println!("Saving wrapper: {}", launch_wrapper.read());
+                        println!("Saving runner: {}", selected_runner.read());
+                        on_back.call(event);
+                    },
+                    rect {
+                        direction: "horizontal",
+                        cross_align: "center",
+                        spacing: "8",
+                        label {
+                            font_size: "16",
+                            font_weight: "500",
+                            color: "white",
+                            "Save Changes"
+                        }
+                    }
+                }
             }
             
-            // Content
             rect {
                 width: "fill",
                 height: "fill",
@@ -112,7 +140,6 @@ pub fn GameSettings(
                     direction: "vertical",
                     spacing: "32",
                     
-                    // Header
                     rect {
                         direction: "vertical",
                         spacing: "8",
@@ -127,19 +154,17 @@ pub fn GameSettings(
                         label {
                             font_size: "20",
                             font_weight: "400",
-                            color: "rgb(160, 160, 170)",
+                            color: "rgb(200, 200, 210)",
                             "{game_name}"
                         }
                     }
                     
-                    // Divider
                     rect {
                         width: "fill",
                         height: "1",
-                        background: "rgb(60, 60, 70)",
+                        background: "rgb(80, 80, 90)",
                     }
                     
-                    // Launch Wrapper Section
                     rect {
                         direction: "vertical",
                         spacing: "16",
@@ -153,34 +178,24 @@ pub fn GameSettings(
                         
                         label {
                             font_size: "14",
-                            color: "rgb(160, 160, 170)",
+                            color: "rgb(200, 200, 210)",
                             "Add environment variables or commands before %command%"
                         }
                         
-                        rect {
+                        Input {
+                            value: launch_wrapper.read().clone(),
+                            onchange: move |e| launch_wrapper.set(e),
+                            placeholder: "",
                             width: "fill",
-                            height: "48",
-                            background: "rgb(30, 30, 35)",
-                            corner_radius: "8",
-                            padding: "12",
-                            border: "1 solid rgb(60, 60, 70)",
-                            
-                            Input {
-                                value: launch_wrapper.read().clone(),
-                                onchange: move |e| launch_wrapper.set(e),
-                                placeholder: "",
-                                width: "fill",
-                            }
                         }
                         
                         label {
                             font_size: "12",
-                            color: "rgb(120, 120, 130)",
+                            color: "rgb(180, 180, 190)",
                             "Example: WINE_CANONICAL_HOLE=skip_volatile_check %command% or PROTON_LOG=1 mangohud %command%"
                         }
                     }
                     
-                    // Proton Runner Section
                     rect {
                         direction: "vertical",
                         spacing: "16",
@@ -189,23 +204,22 @@ pub fn GameSettings(
                             font_size: "18",
                             font_weight: "600",
                             color: "white",
-                            "Proton Runner"
+                            "Runner options"
                         }
                         
                         label {
                             font_size: "14",
-                            color: "rgb(160, 160, 170)",
+                            color: "rgb(200, 200, 210)",
                             "Select which Proton/Wine version to use"
                         }
                         
-                        // Dropdown button
                         rect {
                             width: "fill",
                             height: "48",
                             background: "rgb(30, 30, 35)",
                             corner_radius: "8",
                             padding: "12 16",
-                            border: "1 solid rgb(60, 60, 70)",
+                            border: "1 solid rgb(80, 80, 90)",
                             direction: "horizontal",
                             main_align: "space-between",
                             cross_align: "center",
@@ -232,13 +246,12 @@ pub fn GameSettings(
                             }
                         }
                         
-                        // Dropdown menu
                         if *show_runner_dropdown.read() {
                             rect {
                                 width: "fill",
                                 background: "rgb(30, 30, 35)",
                                 corner_radius: "8",
-                                border: "1 solid rgb(60, 60, 70)",
+                                border: "1 solid rgb(80, 80, 90)",
                                 direction: "vertical",
                                 
                                 for runner in runner_options {
@@ -267,50 +280,10 @@ pub fn GameSettings(
                         }
                     }
                     
-                    // Divider
                     rect {
                         width: "fill",
                         height: "1",
-                        background: "rgb(60, 60, 70)",
-                    }
-                    
-                    // Action buttons
-                    rect {
-                        direction: "horizontal",
-                        spacing: "12",
-                        main_align: "end",
-                        
-                        MyButton {
-                            onpress: on_back,
-                            rect {
-                                padding: "12 24",
-                                label {
-                                    font_size: "14",
-                                    font_weight: "500",
-                                    color: "white",
-                                    "Cancel"
-                                }
-                            }
-                        }
-                        
-                        MyButton {
-                            onpress: move |event| {
-                                println!("Saving wrapper: {}", launch_wrapper.read());
-                                println!("Saving runner: {}", selected_runner.read());
-                                on_back.call(event);
-                            },
-                            rect {
-                                padding: "12 24",
-                                background: "rgb(255, 149, 0)",
-                                corner_radius: "8",
-                                label {
-                                    font_size: "14",
-                                    font_weight: "500",
-                                    color: "white",
-                                    "Save Changes"
-                                }
-                            }
-                        }
+                        background: "rgb(80, 80, 90)",
                     }
                 }
             }

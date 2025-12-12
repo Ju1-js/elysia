@@ -143,13 +143,16 @@ pub fn Game() -> Element {
     let selected_game_id = use_context::<Signal<Option<String>>>();
     let ctx = use_context::<Context>();
     let settings_sig = use_context::<Signal<Arc<RwLock<GlobalSettings>>>>();
+    
     let mut current_page = use_signal(|| "game");
+    let mut prev_game_id = use_signal(|| None::<String>);
 
-    use_effect(use_reactive!(|selected_game_id| {
-        let _ = selected_game_id.read();
+    let current_game_id = selected_game_id.read().clone();
+    if prev_game_id.read().as_ref() != current_game_id.as_ref() {
         current_page.set("game");
-    }));
-
+        prev_game_id.set(current_game_id.clone());
+    }
+ 
     let game_id = selected_game_id.read();
     let Some(ref game_id_str) = *game_id else {
         return rsx! { rect { width: "fill", height: "fill" } };
