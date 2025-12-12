@@ -13,7 +13,26 @@ pub struct MyAnimatedCarouselProps {
 pub fn MyAnimatedCarousel(props: MyAnimatedCarouselProps) -> Element {
     let MyAnimatedCarouselProps { items, selected } = props;
     let (reference, node_size) = use_node_signal();
-    let mut state = use_signal(|| CarouselState::Stopped(0));
+    
+    // Initialize state from selected prop if provided
+    let mut state = use_signal(|| {
+        let initial_index = selected.as_ref().map(|s| s()).unwrap_or(0);
+        CarouselState::Stopped(initial_index)
+    });
+
+    // Sync internal state with external selected signal when it changes
+    use_effect(move || {
+        if let Some(sel) = selected {
+            let external_index = sel();
+            let current_state = *state.read();
+            // Only update if we're stopped and the indices don't match
+            if let CarouselState::Stopped(internal_index) = current_state {
+                if internal_index != external_index {
+                    *state.write() = CarouselState::Stopped(external_index);
+                }
+            }
+        }
+    });
 
     let len = items.len();
     let onwheel = move |e: Event<WheelData>| {

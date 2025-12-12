@@ -112,19 +112,25 @@ fn AnimatedOutlet(children: Element) -> Element {
     )
 }
 
-fn make_links(games: &[backend::game_providers::hoyoplay::proto::Game], selected_game_id: Signal<Option<String>>) -> Vec<Element> {
+fn make_links(
+    games: &[backend::game_providers::hoyoplay::proto::Game],
+    selected_game_id: Signal<Option<String>>,
+    navigator: Navigator,
+) -> Vec<Element> {
     games
         .iter()
         .map(|game| {
             let game_id = game.id.clone();
             let is_active = selected_game_id.read().as_ref() == Some(&game_id);
             let mut selected_game_id_mut = selected_game_id;
+            let nav = navigator.clone();
 
             rsx!(
                 rect {
                     key: "{game_id}",
                     onclick: move |_| {
                         selected_game_id_mut.write().replace(game_id.clone());
+                        nav.push(Route::Game); // Navigate immediately for smooth transition
                     },
                     MySidebarItem {
                         is_active: is_active,
@@ -161,14 +167,7 @@ fn AppLayout() -> Element {
     let ctx_resource = &use_context::<Resource<Context>>();
     let selected_game_id = use_signal(|| None::<String>);
     let navigator = use_navigator();
-    let route = use_route::<Route>();
     
-    // Navigate to /games when a game is selected
-    use_effect(move || {
-        if selected_game_id.read().is_some() && route != Route::Game {
-            navigator.push(Route::Game);
-        }
-    });
     use_context_provider(|| selected_game_id);
 
     rsx! {
@@ -198,7 +197,7 @@ fn AppLayout() -> Element {
                                 Some(ctx) => {
                                     use_context_provider(|| ctx.clone());
                                     rsx! {
-                                        for link in make_links(&ctx.api_games, selected_game_id) {
+                                        for link in make_links(&ctx.api_games, selected_game_id, navigator.clone()) {
                                             {link}
                                         }
                                     }

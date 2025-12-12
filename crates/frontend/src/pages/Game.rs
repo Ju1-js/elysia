@@ -145,12 +145,34 @@ pub fn Game() -> Element {
     let settings_sig = use_context::<Signal<Arc<RwLock<GlobalSettings>>>>();
     let mut current_page = use_signal(|| "game");
 
+    let games_for_preload = ctx.api_games.clone();
+    let mut has_preloaded = use_signal(|| false);
+    
+    use_effect(move || {
+        if !has_preloaded() {
+            let settings = settings_sig.read();
+            
+            if let Ok(s) = settings.read() {
+                let cache_path = s.cache_directory.display().to_string();
+                
+                let urls: Vec<Url> = games_for_preload.iter()
+                    .filter_map(|g| g.display.background.url.parse().ok())
+                    .collect();
+                
+                // Preload in background - won't block UI
+                crate::components::preload_images(urls, cache_path);
+                has_preloaded.set(true); // Mark as preloaded
+            }
+        }
+    });
+
     let game_id = selected_game_id.read();
     let Some(ref game_id_str) = *game_id else {
         return rsx! { rect { width: "fill", height: "fill" } };
     };
 
-    let Some(game) = ctx.api_games.iter().find(|g| &g.id == game_id_str).cloned() else {
+    // Game lookup - simple inline operation since Game doesn't implement PartialEq
+    let Some(game_data) = ctx.api_games.iter().find(|g| &g.id == game_id_str).cloned() else {
         return rsx! { 
             rect { 
                 width: "fill",
@@ -160,7 +182,18 @@ pub fn Game() -> Element {
         };
     };
 
-    let Ok(url) = game.display.background.url.parse::<Url>() else {
+    // Memoize URL parsing - only parses when game_id changes
+    // URL parsing is relatively expensive and doesn't need to happen every render
+    let url = use_memo(move || {
+        let game_id = selected_game_id.read();
+        game_id.as_ref().and_then(|id| {
+            ctx.api_games.iter()
+                .find(|g| &g.id == id)
+                .and_then(|g| g.display.background.url.parse::<Url>().ok())
+        })
+    });
+
+    let Some(parsed_url) = url.read().clone() else {
         return rsx! {
             rect {
                 width: "fill",
@@ -172,20 +205,21 @@ pub fn Game() -> Element {
 
     // Reset news widget carousel when game changes
     let mut news_carousel_index = use_signal(|| 0);
-    let game_id_for_effect = game.id.clone();
+    let game_id_for_effect = game_id_str.clone();
     use_effect(use_reactive!(|game_id_for_effect| {
-        let _ = game_id_for_effect;
+        let _ = game_id_for_effect; // React to game ID changes
         news_carousel_index.set(0);
     }));
 
-    let is_installed = check_game_installed(&settings_sig, &game.id, &game.biz);
+    // Derived values - computed inline since they're cheap operations
+    let is_installed = check_game_installed(&settings_sig, &game_data.id, &game_data.biz);
     let (progress_key, get_progress_fn) = create_progress_getter(
         settings_sig,
-        game.id.clone(),
-        game.biz.clone()
+        game_data.id.clone(),
+        game_data.biz.clone()
     );
-    let onpress = create_game_action_handler(settings_sig, game.id.clone(), game.biz.clone());
-    let crossfade = use_crossfade_background(url);
+    let onpress = create_game_action_handler(settings_sig, game_data.id.clone(), game_data.biz.clone());
+    let crossfade = use_crossfade_background(parsed_url);
 
     // Show settings page if selected
     if *current_page.read() != "game" {
@@ -193,7 +227,7 @@ pub fn Game() -> Element {
             GameSettings {
                 on_back: move |_| current_page.set("game"),
                 background_url: crossfade.curr_url.clone(),
-                game_name: game.display.name.clone(),
+                game_name: game_data.display.name.clone(),
             }
         };
     }
@@ -299,13 +333,13 @@ pub fn Game() -> Element {
                 rect {
                     width: "450",
                     MyNewsWidget {
-                        game_id: game.id.clone(),
+                        game_id: game_data.id.clone(),
                         carousel_index: news_carousel_index,
                     }
                 }
                 
                 DownloadControl {
-                    game_id: game.id.clone(),
+                    game_id: game_data.id.clone(),
                     progress_key: progress_key,
                     installed: is_installed,
                     get_progress: get_progress_fn,

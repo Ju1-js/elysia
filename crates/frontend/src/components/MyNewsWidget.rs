@@ -1,15 +1,19 @@
+use std::sync::{Arc, RwLock};
 use freya::prelude::*;
 use reqwest::Url;
 use backend::game_providers::hoyoplay::get_game_content;
+use backend::settings::GlobalSettings;
 use crate::{
-    components::{MyAnimatedCarousel, MyNetworkImage},
+    components::{MyAnimatedCarousel, MyNetworkImage, preload_images},
     context::Context,
 };
 
 #[component]
 pub fn MyNewsWidget(game_id: String, carousel_index: Signal<usize>) -> Element {
-    let ctx = &use_context::<Context>();
-    let Some(content) = ctx.api_news.get(&game_id) else {
+    let ctx = use_context::<Context>();
+    let settings_sig = use_context::<Signal<Arc<RwLock<GlobalSettings>>>>();
+    
+    let Some(content) = ctx.api_news.get(&game_id).cloned() else {
         return rsx!({});
     };
 
@@ -19,9 +23,28 @@ pub fn MyNewsWidget(game_id: String, carousel_index: Signal<usize>) -> Element {
     }
 
     let len = content.banners.len();
-    let preload_signals: Vec<_> = content.banners.iter().map(|banner| {
-        use_signal(|| banner.image.url.parse::<Url>().ok())
-    }).collect();
+
+    // Preload all banner images in the background
+    let game_id_for_effect = game_id.clone();
+    let banners_for_effect = content.banners.clone();
+    use_effect(use_reactive!(|game_id_for_effect| {
+        let _ = game_id_for_effect; // React to game_id changes
+        
+        // Collect all banner URLs
+        let urls: Vec<Url> = banners_for_effect.iter()
+            .filter_map(|b| b.image.url.parse().ok())
+            .collect();
+        
+        // Get cache path and convert PathBuf to String
+        let cache_path = settings_sig.read()
+            .read()
+            .ok()
+            .map(|s| s.cache_directory.display().to_string())
+            .unwrap_or_default();
+        
+        // Preload images asynchronously
+        preload_images(urls, cache_path);
+    }));
 
     rsx! {
         rect {
@@ -29,31 +52,14 @@ pub fn MyNewsWidget(game_id: String, carousel_index: Signal<usize>) -> Element {
             main_align: "start",
             spacing: "12",
             width: "100%",
-
-            // try to preload all widget images (?)
-            // to-do: do this a better way
-            rect {
-                width: "0",
-                height: "0",
-                overflow: "clip",
-                for (i, url_sig) in preload_signals.iter().enumerate() {
-                    if let Some(url) = url_sig.read().clone() {
-                        MyNetworkImage {
-                            key: "{i}",
-                            url: url,
-                            width: "1",
-                            height: "1",
-                        }
-                    }
-                }
-            }
-
+            
             rect {
                 direction: "vertical",
                 width: "100%",
                 spacing: "8",
                 
-                rect { // Image Carousel
+                // Image Carousel
+                rect {
                     direction: "horizontal",
                     spacing: "0",
                     padding: "0",
@@ -64,10 +70,11 @@ pub fn MyNewsWidget(game_id: String, carousel_index: Signal<usize>) -> Element {
                     backdrop_blur: "24",
                     
                     MyAnimatedCarousel {
-                        items: content.banners.iter().map(|url| {
-                            rsx!{
+                        key: "{game_id}",
+                        items: content.banners.iter().map(|banner| {
+                            rsx! {
                                 MyNetworkImage {
-                                    url: url.image.url.parse::<Url>().unwrap(),
+                                    url: banner.image.url.parse::<Url>().unwrap(),
                                     aspect_ratio: "min",
                                     sampling: "catmull-rom"
                                 }
@@ -75,8 +82,8 @@ pub fn MyNewsWidget(game_id: String, carousel_index: Signal<usize>) -> Element {
                         }).collect(),
                         selected: carousel_index,
                     }
-                },
-
+                }
+                
                 // Pagination dots
                 rect {
                     width: "100%",
@@ -108,9 +115,10 @@ pub fn MyNewsWidget(game_id: String, carousel_index: Signal<usize>) -> Element {
                         }
                     }
                 }
-            },
-
-            rect { // Event List
+            }
+            
+            // Event List (TODO)
+            rect {
                 // TODO: Add news/events list
             }
         }
