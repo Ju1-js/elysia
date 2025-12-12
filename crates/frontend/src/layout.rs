@@ -143,7 +143,7 @@ fn make_links(
                                         cover: "center",
                                         width: "48",
                                         height: "48",
-                                        sampling: "catmull-rom"
+                                        sampling: "trilinear"
                                     }
                                 ),
                                 Err(_) => rsx!(

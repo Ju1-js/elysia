@@ -220,7 +220,7 @@ pub async fn get_games() -> Result<GetGames, String> {
     let app_code = "zePXHT2t4L2tKR4m";
     
     let placeholder_icon = Image {
-        url: "https://play-lh.googleusercontent.com/l6FVNa293RykBWy88TqEhUakIcGSC8bRygSnKOBgztln48JX-WzMWnrBAETrKZsxDNC4HhwCsvfle_UI7rBE=w240-h480-rw".to_string(),
+        url: "https://play-lh.googleusercontent.com/l6FVNa293RykBWy88TqEhUakIcGSC8bRygSnKOBgztln48JX-WzMWnrBAETrKZsxDNC4HhwCsvfle_UI7rBE=w960-h1920-rw".to_string(),
         hover_url: String::new(),
         link: String::new(),
         login_state_in_link: false,
