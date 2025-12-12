@@ -13,6 +13,7 @@ use std::sync::RwLock;
 use std::{collections::HashMap, sync::Arc};
 
 use freya::prelude::*;
+use reqwest::Url;
 
 use crate::context::Context;
 use backend::{
@@ -98,7 +99,6 @@ fn app() -> Element {
         let settings = settings.read();
         let settings = settings.read().unwrap().clone();
 
-        // Get hoyoplay games
         let mut api_games = get_games(&settings)
             .await
             .map_err(|e| e.to_string())
@@ -108,7 +108,6 @@ fn app() -> Element {
                 Vec::new()
             });
 
-        // Get endfield games
         let endfield_games = backend::game_providers::endfield::get_games()
             .await
             .map(|v| v.games)
@@ -117,7 +116,6 @@ fn app() -> Element {
                 Vec::new()
             });
 
-        // Merge games lists
         api_games.extend(endfield_games);
 
         let mut api_news = HashMap::new();
@@ -149,5 +147,33 @@ fn app() -> Element {
     });
 
     use_context_provider(move || ctx);
+    
+    let settings_for_preload = settings.clone();
+    let mut has_preloaded = use_signal(|| false);
+    
+    use_effect(move || {
+        if !has_preloaded() {
+            if let Some(context) = ctx.read_unchecked().as_ref() {
+                let games = context.api_games.clone();
+                let settings = settings_for_preload.clone();
+                
+                spawn(async move {
+                    let s = settings.read();
+                    if let Ok(settings_data) = s.read() {
+                        let cache_path = settings_data.cache_directory.display().to_string();
+                        
+                        let urls: Vec<Url> = games.iter()
+                            .filter_map(|g| g.display.background.url.parse().ok())
+                            .collect();
+                        
+                        components::preload_images(urls, cache_path);
+                    }
+                });
+                
+                has_preloaded.set(true);
+            }
+        }
+    });
+    
     layout::app()
 }

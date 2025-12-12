@@ -150,26 +150,6 @@ pub fn Game() -> Element {
         current_page.set("game");
     }));
 
-    let games_for_preload = ctx.api_games.clone();
-    let mut has_preloaded = use_signal(|| false);
-    
-    use_effect(move || {
-        if !has_preloaded() {
-            let settings = settings_sig.read();
-            
-            if let Ok(s) = settings.read() {
-                let cache_path = s.cache_directory.display().to_string();
-
-                let urls: Vec<Url> = games_for_preload.iter()
-                    .filter_map(|g| g.display.background.url.parse().ok())
-                    .collect();
-
-                crate::components::preload_images(urls, cache_path);
-                has_preloaded.set(true); // Mark as preloaded
-            }
-        }
-    });
-
     let game_id = selected_game_id.read();
     let Some(ref game_id_str) = *game_id else {
         return rsx! { rect { width: "fill", height: "fill" } };
@@ -235,7 +215,6 @@ pub fn Game() -> Element {
             width: "fill",
             height: "fill",
             
-            // Previous background (right-aligned, crossfades out)
             rect {
                 position: "absolute",
                 position_top: "0",
@@ -252,7 +231,6 @@ pub fn Game() -> Element {
                 }
             }
             
-            // Current background (right-aligned, crossfades in)
             rect {
                 position: "absolute",
                 position_top: "0",
@@ -269,7 +247,6 @@ pub fn Game() -> Element {
                 }
             }
             
-            // Blur layer (static, doesn't crossfade)
             rect {
                 position: "absolute",
                 position_top: "0",
@@ -285,7 +262,6 @@ pub fn Game() -> Element {
                 }
             }
             
-            // Top right buttons
             rect {
                 position: "absolute",
                 position_top: "0",

@@ -10,7 +10,6 @@ pub fn Home() -> Element {
             cross_align: "center",
             main_align: "center",
             direction: "vertical",
-
             rect {
                 position: "absolute",
                 position_top: "0",
@@ -20,7 +19,6 @@ pub fn Home() -> Element {
                 layer: "-1",
                 background: "linear-gradient(135deg, rgb(20,20,30) 0%, rgb(10,10,15) 100%)",
             },
-
             rect {
                 direction: "vertical",
                 cross_align: "center",
@@ -32,7 +30,6 @@ pub fn Home() -> Element {
                 shadow: "0 8 32 0 rgb(0, 0, 0, 60)",
                 backdrop_blur: "24",
                 max_width: "600",
-
                 image {
                     width: "120",
                     height: "120",

@@ -38,7 +38,7 @@ fn FromRouteToCurrent(
     let mut animated_router = use_animated_router::<Route>();
     let animations = use_animation_with_dependencies(&upwards, move |_conf, _upwards| {
         AnimNum::new(1.0, 0.0)
-            .time(700)
+            .time(800)
             .ease(Ease::InOut)
             .function(Function::Cubic)
     });
