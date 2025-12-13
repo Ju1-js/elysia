@@ -513,9 +513,9 @@ pub fn Game() -> Element {
     // React to settings changes to detect installation completion
     let game_id_for_install_check = game_data.id.clone();
     let biz_for_install_check = game_data.biz.clone();
-    let is_installed = use_memo(move || {
+    let is_installed = use_memo(use_reactive!(|settings_sig, game_id_for_install_check, biz_for_install_check| {
         check_game_installed(&settings_sig, &game_id_for_install_check, &biz_for_install_check)
-    });
+    }));
     
     let (progress_key, get_progress_fn) = create_progress_getter(
         settings_sig,
