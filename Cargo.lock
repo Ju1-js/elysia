@@ -523,6 +523,7 @@ dependencies = [
  "serde",
  "serde_json",
  "stream-unpack",
+ "stream-unpacker",
  "tar",
  "tokio",
  "zip",
@@ -4406,6 +4407,19 @@ dependencies = [
  "byteorder",
  "inflate",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "stream-unpacker"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "md5",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "stream-unpack",
+ "tokio",
 ]
 
 [[package]]
