@@ -24,10 +24,10 @@ impl Progress {
         }
     }
 
-    pub fn resuming(downloaded: u64, part: usize, parts_total: usize) -> Self {
+    pub fn resuming(downloaded: u64, total: u64, part: usize, parts_total: usize) -> Self {
         Self {
             downloaded,
-            total: 0,
+            total,
             mb_s: 0.0,
             part_index: part,
             parts_total,
@@ -36,12 +36,18 @@ impl Progress {
         }
     }
 
-    pub fn downloading(downloaded: u64, mb_s: f32, parts_total: usize) -> Self {
+    pub fn downloading(
+        downloaded: u64,
+        total: u64,
+        mb_s: f32,
+        part: usize,
+        parts_total: usize,
+    ) -> Self {
         Self {
             downloaded,
-            total: 0,
+            total,
             mb_s,
-            part_index: 0,
+            part_index: part,
             parts_total,
             status: "Downloading...".to_string(),
             is_busy: false,

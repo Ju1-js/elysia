@@ -98,7 +98,10 @@ fn create_range_provider(
 
 async fn read_central_directory(client: &Client, archives: &[Archive]) -> Result<CentralDirectory> {
     let sizes = part_sizes(archives);
+
+    println!("Part sizes: {:?}", sizes);
     let verified_sizes = verify_last_part_size(client, archives, sizes).await?;
+    println!("Verified part sizes: {:?}", verified_sizes);
 
     let provider = create_range_provider(client.to_owned(), archives);
     let cd = read_cd::from_provider(verified_sizes, true, provider)
@@ -277,10 +280,14 @@ pub async fn stream_unpack(
     let (archive_start, start_offset, mut total_downloaded) = if let Some(pos) = resume_pos {
         let (part, offset, downloaded) = calculate_resume_point(&archives, pos);
         progress_sender
-            .send(Progress::resuming(downloaded, part, archives.len()))
+            .send(Progress::resuming(downloaded, total, part, archives.len()))
             .await?;
         (part, offset, downloaded)
     } else {
+        progress_sender
+            .send(Progress::downloading(0, total, 0.0, 0, archives.len()))
+            .await?;
+
         (0, 0, 0u64)
     };
 
@@ -328,8 +335,10 @@ pub async fn stream_unpack(
                 progress_sender
                     .send(Progress::downloading(
                         total_downloaded,
+                        total,
                         mb_s,
                         archive_idx + 1,
+                        archives.len(),
                     ))
                     .await?;
             }

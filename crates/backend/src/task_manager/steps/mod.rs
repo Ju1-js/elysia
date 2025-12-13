@@ -14,7 +14,7 @@ pub enum Step {
 }
 
 impl Step {
-    pub async fn run(&self, _status_tx: mpsc::Sender<TaskStatus>, client: &Client) -> Result<()> {
+    pub async fn run(&self, status_tx: mpsc::Sender<TaskStatus>, client: &Client) -> Result<()> {
         match self {
             Step::DownloadFiles => {
                 println!("Running File step");
@@ -22,7 +22,7 @@ impl Step {
             }
             Step::DownloadFromArchives(step) => {
                 println!("Running Archive step");
-                step.run(client).await?;
+                step.run(status_tx, client).await?;
                 Ok(())
             }
         }

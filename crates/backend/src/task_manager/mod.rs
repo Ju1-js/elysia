@@ -1,10 +1,8 @@
 pub mod steps;
 
-use std::path::PathBuf;
-
 use anyhow::Result;
 use reqwest::Client;
-use tokio::sync::mpsc;
+use tokio::{runtime, sync::mpsc};
 
 use crate::task_manager::steps::Step;
 
@@ -19,7 +17,6 @@ pub enum TaskStatus {
 
 pub struct Task {
     pub steps: Vec<Step>,
-    pub dest: PathBuf,
 }
 
 pub struct TaskManager {
@@ -32,14 +29,16 @@ impl TaskManager {
         let (submit_tx, submit_rx) = mpsc::channel::<Task>(100);
         let (status_tx, status_rx) = mpsc::channel::<TaskStatus>(100);
 
-        let local = tokio::task::LocalSet::new();
+        let rt = runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
 
-        {
-            local.enter();
-            tokio::task::spawn_local(async move {
+        std::thread::spawn(move || {
+            rt.block_on(async move {
                 worker_loop(submit_rx, status_tx, client).await;
             });
-        }
+        });
 
         Self {
             submit_tx,
@@ -81,14 +80,6 @@ async fn try_run_task(
 ) -> Result<()> {
     // TODO: Handle SendErrors
     let _ = status_tx.send(TaskStatus::Preparing {}).await;
-
-    let _ = status_tx
-        .send(TaskStatus::Progress {
-            current: 0,
-            total: 100,
-            mb_s: 0.0,
-        })
-        .await;
 
     for step in task.steps {
         step.run(status_tx.clone(), client).await?;
