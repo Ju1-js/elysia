@@ -7,24 +7,14 @@ use tokio::sync::mpsc;
 
 use crate::task_manager::TaskStatus;
 
-pub enum ArchiveKind {
-    Zip,
-    //TarGz,
-}
-
-pub struct ArchiveStep {
+pub struct ZipStreamStep {
     pub dest: PathBuf,
     pub archives: Vec<Archive>,
-    archive_kind: ArchiveKind,
 }
 
-impl ArchiveStep {
-    pub fn new(dest: PathBuf, archives: Vec<Archive>, archive_kind: ArchiveKind) -> Self {
-        Self {
-            dest,
-            archives,
-            archive_kind,
-        }
+impl ZipStreamStep {
+    pub fn new(dest: PathBuf, archives: Vec<Archive>) -> Self {
+        Self { dest, archives }
     }
 
     pub async fn run(&self, status_tx: mpsc::Sender<TaskStatus>, client: &Client) -> Result<()> {
@@ -32,13 +22,6 @@ impl ArchiveStep {
             return Ok(());
         }
 
-        match self.archive_kind {
-            ArchiveKind::Zip => self.run_zip(status_tx, client).await,
-            //ArchiveKind::TarGz => self.run_tar_gz(client).await,
-        }
-    }
-
-    async fn run_zip(&self, status_tx: mpsc::Sender<TaskStatus>, client: &Client) -> Result<()> {
         let _ = status_tx.send(TaskStatus::Started {}).await;
         println!("Archive step dest: {}", self.dest.display());
 
