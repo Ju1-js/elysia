@@ -87,12 +87,8 @@ fn AnimatedOutlet(children: Element) -> Element {
     let animated_router = use_context::<Signal<AnimatedRouterContext<Route>>>();
 
     let from_route = match animated_router() {
-        AnimatedRouterContext::FromTo(Route::Home, Route::Game) => {
-            Some((rsx!(Home {}), true))
-        }
-        AnimatedRouterContext::FromTo(Route::Game, Route::Home) => {
-            Some((rsx!(Game {}), false))
-        }
+        AnimatedRouterContext::FromTo(Route::Home, Route::Game) => Some((rsx!(Home {}), true)),
+        AnimatedRouterContext::FromTo(Route::Game, Route::Home) => Some((rsx!(Game {}), false)),
         _ => None,
     };
 
@@ -118,17 +114,16 @@ fn make_links(
     games
         .iter()
         .map(|game| {
-            let game_id = game.id.clone();
-            let is_active = selected_game_id.read().as_ref() == Some(&game_id);
+            let is_active = selected_game_id.read().as_ref() == Some(&game.id);
             let mut selected_game_id_mut = selected_game_id;
-            let nav = navigator.clone();
+            let game_id = game.id.clone();
 
             rsx!(
                 rect {
-                    key: "{game_id}",
+                    key: game.id.clone(),
                     onclick: move |_| {
                         selected_game_id_mut.write().replace(game_id.clone());
-                        nav.push(Route::Game);
+                        navigator.push(Route::Game);
                     },
                     MySidebarItem {
                         is_active: is_active,
@@ -165,7 +160,7 @@ fn AppLayout() -> Element {
     let ctx_resource = &use_context::<Resource<Context>>();
     let selected_game_id = use_signal(|| None::<String>);
     let navigator = use_navigator();
-    
+
     use_context_provider(|| selected_game_id);
 
     rsx! {
@@ -215,7 +210,7 @@ fn AppLayout() -> Element {
                             cross_align: "center",
                             spacing: "20",
                             padding: "14",
-                            
+
                             Link {
                                 key: "settings",
                                 to: Route::Home,
@@ -234,7 +229,7 @@ fn AppLayout() -> Element {
                                     }
                                 }
                             }
-                            
+
                             rect {
                                 onclick: move |_| {
                                     println!("Elysia logo clicked - add website URL here");
@@ -256,7 +251,7 @@ fn AppLayout() -> Element {
                         overflow: "clip",
                         width: "fill",
                         height: "100%",
-                        
+
                         Body {
                             AnimatedOutlet { }
                         }
