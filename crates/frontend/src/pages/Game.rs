@@ -493,6 +493,7 @@ pub fn Game() -> Element {
         video_ctrl.prev_url.set(video_url.clone());
     }
 
+    // Reset video when returning from GameSettings
     if *video_ctrl.prev_page.read() != *page_ctrl.current.read() {
         video_ctrl.prev_page.set(*page_ctrl.current.read());
         if *page_ctrl.current.read() == "game" {
@@ -509,7 +510,13 @@ pub fn Game() -> Element {
         news_carousel_index.set(0);
     }));
 
-    let is_installed = check_game_installed(&settings_sig, &game_data.id, &game_data.biz);
+    // React to settings changes to detect installation completion
+    let game_id_for_install_check = game_data.id.clone();
+    let biz_for_install_check = game_data.biz.clone();
+    let is_installed = use_memo(move || {
+        check_game_installed(&settings_sig, &game_id_for_install_check, &biz_for_install_check)
+    });
+    
     let (progress_key, get_progress_fn) = create_progress_getter(
         settings_sig,
         game_data.id.clone(),
@@ -583,7 +590,7 @@ pub fn Game() -> Element {
                 DownloadControl {
                     game_id: game_data.id.clone(),
                     progress_key: progress_key,
-                    installed: is_installed,
+                    installed: *is_installed.read(),
                     get_progress: get_progress_fn,
                     accent_color: "#ff9500".to_string(),
                     onpress: onpress,
