@@ -140,9 +140,18 @@ fn app() -> Element {
             }
         }
 
+        let api_game_basic_info = backend::game_providers::hoyoplay::get_all_game_basic_info(&settings, None)
+            .await
+            .map(|info| info.game_info_list)
+            .unwrap_or_else(|e| {
+                println!("Failed to load game basic info: {e}");
+                Vec::new()
+            });
+
         Context {
             api_games,
             api_news,
+            api_game_basic_info,
         }
     });
 

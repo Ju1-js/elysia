@@ -21,3 +21,6 @@ bytes = "1.10.1"
 cacache = { version = "13.1.0", features = ["libc", "memmap2", "mmap", "tokio-runtime"], default-features = false }
 tar = "0.4.44"
 dashmap = "6.1.0"
+ffmpeg-next = "8.0.0"
+image = "0.25.9"
+uuid = "1.19.0"

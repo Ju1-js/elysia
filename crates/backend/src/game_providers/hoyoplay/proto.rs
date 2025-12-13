@@ -1,5 +1,56 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct GetAllGameBasicInfo {
+    pub game_info_list: Vec<GameBasicInfo>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct GameBasicInfo {
+    pub game: GameIdentifier,
+    pub backgrounds: Vec<Background>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct GameIdentifier {
+    pub id: String,
+    pub biz: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct Background {
+    pub id: String,
+    pub background: MediaAsset,
+    pub icon: IconAsset,
+    pub video: VideoAsset,
+    pub theme: MediaAsset,
+    #[serde(rename = "type")]
+    pub background_type: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct MediaAsset {
+    pub url: String,
+    pub link: String,
+    pub login_state_in_link: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct IconAsset {
+    pub url: String,
+    pub hover_url: String,
+    pub link: String,
+    pub login_state_in_link: bool,
+    pub md5: String,
+    pub size: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct VideoAsset {
+    pub url: String,
+    pub size: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiResponse<DataType> {
     pub retcode: i32,

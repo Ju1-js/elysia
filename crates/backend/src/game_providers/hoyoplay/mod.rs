@@ -8,7 +8,7 @@ use std::{
 };
 
 use md5::Digest;
-use proto::{ApiResponse, Game, GetGameContent, GetGames};
+use proto::{ApiResponse, Game, GetGameContent, GetGames, GetAllGameBasicInfo};
 use reqwest;
 use serde::{Deserialize, Serialize};
 use tokio::{fs::File, io::AsyncReadExt};
@@ -52,6 +52,42 @@ pub async fn get_game_configs(settings: &GlobalSettings) -> Result<GetGameConfig
     let url = format!("{API_URL}/getGameConfigs?launcher_id={LAUNCHER_ID}&language=en-us");
 
     return cached_request(settings, &url).await;
+}
+
+/// Get all game basic info including video backgrounds
+/// If game_id is provided, filters for that specific game
+pub async fn get_all_game_basic_info(
+    settings: &GlobalSettings,
+    game_id: Option<&str>,
+) -> Result<GetAllGameBasicInfo, String> {
+    let game_id_param = game_id.unwrap_or("");
+    let url = format!(
+        "{API_URL}/getAllGameBasicInfo?launcher_id={LAUNCHER_ID}&language=en-us&game_id={game_id_param}"
+    );
+
+    return cached_request(settings, &url).await;
+}
+
+/// Get video backgrounds for a specific game
+pub async fn get_game_video_backgrounds(
+    settings: &GlobalSettings,
+    game_id: &str,
+) -> Result<Vec<String>, String> {
+    let basic_info = get_all_game_basic_info(settings, Some(game_id)).await?;
+    
+    let mut video_urls = Vec::new();
+    for game_info in basic_info.game_info_list {
+        if game_info.game.id == game_id {
+            for background in game_info.backgrounds {
+                if background.background_type == "BACKGROUND_TYPE_VIDEO" && !background.video.url.is_empty() {
+                    video_urls.push(background.video.url);
+                }
+            }
+            break;
+        }
+    }
+    
+    Ok(video_urls)
 }
 
 pub async fn scan_dir(

@@ -4,7 +4,16 @@ use freya::prelude::*;
 use reqwest::Url;
 
 use crate::{
-    components::{DownloadControl, DownloadProgress, MyButton, MyNetworkImage, MyNewsWidget},
+    components::{
+        DownloadControl, 
+        DownloadProgress, 
+        MyButton, 
+        MyNetworkImage, 
+        MyNewsWidget,
+        VideoBackgroundPlayer,
+        get_video_url,
+        get_theme_url,
+    },
     pages::GameSettings,
     context::Context,
 };
@@ -168,7 +177,8 @@ pub fn Game() -> Element {
         };
     };
 
-    let url = use_memo(move || {
+    // Get static background URL
+    let bg_url = use_memo(move || {
         let game_id = selected_game_id.read();
         game_id.as_ref().and_then(|id| {
             ctx.api_games.iter()
@@ -177,7 +187,7 @@ pub fn Game() -> Element {
         })
     });
 
-    let Some(parsed_url) = url.read().clone() else {
+    let Some(parsed_bg_url) = bg_url.read().clone() else {
         return rsx! {
             rect {
                 width: "fill",
@@ -185,6 +195,58 @@ pub fn Game() -> Element {
                 label { "Invalid background image URL" }
             }
         };
+    };
+
+    // Get video and theme URLs from API
+    let (video_url, theme_url) = use_memo(move || {
+        let game_id = selected_game_id.read();
+        game_id.as_ref().and_then(|id| {
+            ctx.api_game_basic_info
+                .iter()
+                .find(|info| info.game.id == *id)
+                .map(|info| {
+                    let video = get_video_url(&info.backgrounds);
+                    let theme = get_theme_url(&info.backgrounds);
+                    (video, theme)
+                })
+        })
+    }).read().clone().unwrap_or((None, None));
+
+    // Video fade-in state
+    let mut video_loaded = use_signal(|| false);
+    let video_fade_anim = use_animation(|_| {
+        AnimNum::new(0.0, 1.0)
+            .time(1000)
+            .ease(Ease::InOut)
+            .function(Function::Cubic)
+    });
+
+    // Track video URL changes and reset video_loaded
+    let mut prev_video_url = use_signal(|| video_url.clone());
+    if prev_video_url.read().as_ref() != video_url.as_ref() {
+        video_loaded.set(false);
+        prev_video_url.set(video_url.clone());
+    }
+
+    // Start fade when video is loaded (simulated after a delay)
+    use_effect(use_reactive!(|video_url| {
+        let current_video = video_url.clone();
+        if current_video.is_some() {
+            spawn(async move {
+                // Wait for video to start playing (simulate initial buffering)
+                tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
+                video_loaded.set(true);
+                video_fade_anim.start();
+            });
+        }
+    }));
+
+    let video_opacity = if video_fade_anim.is_running() {
+        video_fade_anim.get().read().read() as f64
+    } else if *video_loaded.read() {
+        1.0
+    } else {
+        0.0
     };
 
     let mut news_carousel_index = use_signal(|| 0);
@@ -200,8 +262,13 @@ pub fn Game() -> Element {
         game_data.id.clone(),
         game_data.biz.clone()
     );
-    let onpress = create_game_action_handler(settings_sig, game_data.id.clone(), game_data.biz.clone());
-    let crossfade = use_crossfade_background(parsed_url);
+    let onpress = create_game_action_handler(
+        settings_sig,
+        game_data.id.clone(),
+        game_data.biz.clone()
+    );
+    
+    let crossfade = use_crossfade_background(parsed_bg_url);
 
     if *current_page.read() != "game" {
         return rsx! {
@@ -218,15 +285,14 @@ pub fn Game() -> Element {
             width: "fill",
             height: "fill",
             
+            // LAYER 1: Previous static background (fading out)
             rect {
                 position: "absolute",
                 position_top: "0",
                 position_left: "0",
                 width: "100%",
                 height: "100%",
-                main_align: "end",
-                cross_align: "end",
-                layer: "2",
+                layer: "3",
                 opacity: "{1.0 - crossfade.fade_progress}",
                 MyNetworkImage {
                     url: crossfade.prev_url,
@@ -234,37 +300,61 @@ pub fn Game() -> Element {
                 }
             }
             
+            // LAYER 2: Current static background (fading in, always visible until video loads)
             rect {
                 position: "absolute",
                 position_top: "0",
                 position_left: "0",
                 width: "100%",
                 height: "100%",
-                main_align: "end",
-                cross_align: "end",
-                layer: "2",
-                opacity: "{crossfade.fade_progress}",
-                MyNetworkImage {
-                    url: crossfade.curr_url.clone(),
-                    sampling: "trilinear",
-                }
-            }
-            
-            rect {
-                position: "absolute",
-                position_top: "0",
-                position_left: "0",
-                width: "100%",
-                height: "100%",
-                main_align: "start",
-                cross_align: "start",
                 layer: "3",
+                opacity: "{crossfade.fade_progress * (1.0 - video_opacity)}",
                 MyNetworkImage {
                     url: crossfade.curr_url.clone(),
                     sampling: "trilinear",
                 }
             }
             
+            // LAYER 3: Video background (fades in when loaded)
+            if let Some(video) = video_url {
+                rect {
+                    position: "absolute",
+                    position_top: "0",
+                    position_left: "0",
+                    width: "100%",
+                    height: "100%",
+                    layer: "2",
+                    opacity: "{video_opacity}",
+                    
+                    VideoBackgroundPlayer {
+                        key: "{video}",
+                        video_url: video,
+                    }
+                }
+            }
+            
+            // LAYER 4: Theme overlay (on top of video)
+            rect {
+                position: "absolute",
+                position_top: "0",
+                position_left: "0",
+                width: "100%",
+                height: "100%",
+                layer: "1",
+                
+                if let Some(theme) = theme_url {
+                    if let Ok(theme_url_parsed) = theme.parse::<Url>() {
+                        MyNetworkImage {
+                            url: theme_url_parsed,
+                            sampling: "trilinear",
+                        }
+                    }
+                }
+            }
+            
+            // LAYER 5: UI Elements
+            
+            // Top-right buttons
             rect {
                 position: "absolute",
                 position_top: "0",
@@ -294,6 +384,7 @@ pub fn Game() -> Element {
                 }
             }
             
+            // Left sidebar
             rect {
                 position: "absolute",
                 position_top: "0",
@@ -325,6 +416,7 @@ pub fn Game() -> Element {
                 }
             }
                 
+            // Bottom-right buttons
             rect {
                 position: "absolute",
                 position_top: "0",
@@ -336,6 +428,7 @@ pub fn Game() -> Element {
                 cross_align: "end",
                 spacing: "12",
                 padding: "32",
+                layer: "-1",
                 
                 MyButton {
                     onpress: move |_| println!("Game tracker clicked!"),
@@ -382,7 +475,6 @@ pub fn Game() -> Element {
                     }
                 }
             }
-
         }
     }
 }
