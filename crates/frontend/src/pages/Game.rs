@@ -180,35 +180,45 @@ fn create_progress_getter(
 }
 
 fn create_game_action_handler(
-    mut settings_sig: Signal<Arc<RwLock<GlobalSettings>>>,
+    settings_sig: Signal<Arc<RwLock<GlobalSettings>>>,
     game_id: String,
     biz: String,
 ) -> EventHandler<PressEvent> {
     EventHandler::new(move |_| {
-        let settings = settings_sig.write();
+        let settings_arc = settings_sig.read().clone();
         
-        let installer = settings.write().ok().and_then(|settings| {
+        let installer = {
+            let settings = match settings_arc.read() {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            
             if let Some(installed_game) = settings.installed_games.get(&game_id) {
                 if let Err(e) = installed_game.runner.run_game(&settings, installed_game) {
                     eprintln!("Failed to run game: {}", e);
                 }
-                return None;
+                return;
             }
 
-            InstallerManager::create_installer(
+            let inst = InstallerManager::create_installer(
                 &game_id,
                 &biz,
                 settings.temp_directory.clone(),
                 settings.components_directory.clone(),
-            )
-        });
+            );
+
+            if let Some(ref installer) = inst {
+                if installer.get_progress(&installer.progress_key()).map_or(false, |p| p.is_busy) {
+                    eprintln!("Installation already in progress");
+                    return;
+                }
+            }
+            
+            inst
+        };
 
         if let Some(inst) = installer {
-            InstallerManager::spawn_install(
-                settings.clone(),
-                inst,
-                game_id.clone(),
-            );
+            InstallerManager::spawn_install(settings_arc, inst, game_id.clone());
         }
     })
 }
