@@ -57,7 +57,7 @@ pub async fn get_game_configs(settings: &GlobalSettings) -> Result<GetGameConfig
 pub async fn scan_dir(
     settings: &GlobalSettings,
     path: &Path,
-) -> Result<Vec<(String, String)>, String> {
+) -> Result<Vec<(String, String, String)>, String> {
     let configs = get_game_configs(settings).await?;
     let mut exe_set = HashSet::new();
     for cfg in configs.launch_configs {
@@ -76,7 +76,11 @@ pub async fn scan_dir(
             let version = game.game_exe_list.iter().find(|v| v.md5 == hash);
 
             if let Some(version) = version {
-                out.push((exe.to_string_lossy().to_string(), version.version.clone()));
+                out.push((
+                    exe.to_string_lossy().to_string(),
+                    game.game_id.clone(),
+                    version.version.clone(),
+                ));
                 break;
             }
         }
