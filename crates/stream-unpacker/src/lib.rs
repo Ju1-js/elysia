@@ -99,10 +99,7 @@ fn create_range_provider(
 async fn read_central_directory(client: &Client, archives: &[Archive]) -> Result<CentralDirectory> {
     let sizes = part_sizes(archives);
 
-    println!("Part sizes: {:?}", sizes);
     let verified_sizes = verify_last_part_size(client, archives, sizes).await?;
-    println!("Verified part sizes: {:?}", verified_sizes);
-
     let provider = create_range_provider(client.to_owned(), archives);
     let cd = read_cd::from_provider(verified_sizes, true, provider)
         .context("failed to read central directory from cut ZIP")?;
