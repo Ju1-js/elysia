@@ -1,7 +1,7 @@
 pub mod proto;
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::read_dir,
     io::Read,
     path::{Path, PathBuf},
@@ -59,25 +59,25 @@ pub async fn scan_dir(
     path: &Path,
 ) -> Result<Vec<(String, String)>, String> {
     let configs = get_game_configs(settings).await?;
-    let map: HashMap<String, String> = configs
-        .launch_configs
-        .iter()
-        .map(|v| (v.exe_file_name.clone(), v.game.id.clone()))
-        .collect();
+    let mut exe_set = HashSet::new();
+    for cfg in configs.launch_configs {
+        exe_set.insert(cfg.exe_file_name.clone());
+    }
 
-    let mut id_to_exe = HashMap::new();
-    scan(path, &map, 0, &mut id_to_exe);
+    let mut found_exes = Vec::new();
+    scan(path, &exe_set, 0, &mut found_exes);
 
     let scan_info = get_game_scan_info(settings).await?;
 
     let mut out = Vec::new();
-    for game in scan_info.game_scan_info {
-        if let Some(exe) = id_to_exe.get(&game.game_id) {
-            let hash = md5(exe).await?;
-            let version = game.game_exe_list.into_iter().find(|v| v.md5 == hash);
+    for exe in &found_exes {
+        let hash = md5(exe).await?;
+        for game in &scan_info.game_scan_info {
+            let version = game.game_exe_list.iter().find(|v| v.md5 == hash);
 
             if let Some(version) = version {
-                out.push((exe.to_string_lossy().to_string(), version.version));
+                out.push((exe.to_string_lossy().to_string(), version.version.clone()));
+                break;
             }
         }
     }
@@ -111,12 +111,7 @@ async fn md5(path: &Path) -> Result<String, String> {
     Ok(hash_hex)
 }
 
-fn scan(
-    dir: &Path,
-    exe_to_id: &HashMap<String, String>,
-    depth: u32,
-    out: &mut HashMap<String, PathBuf>,
-) {
+fn scan(dir: &Path, exe_set: &HashSet<String>, depth: u32, out: &mut Vec<PathBuf>) {
     if depth > 1 {
         return;
     }
@@ -124,13 +119,13 @@ fn scan(
     if let Ok(entries) = read_dir(dir) {
         for entry in entries.into_iter().flatten() {
             let path = entry.path();
-            if path.is_dir() {
-                scan(&path, exe_to_id, depth + 1, out);
+            if depth == 0 && path.is_dir() {
+                scan(&path, exe_set, depth + 1, out);
             } else if let Some(file_name) = path.file_name()
                 && let Some(name_str) = file_name.to_str()
-                && exe_to_id.contains_key(&name_str.to_string())
+                && exe_set.contains(&name_str.to_string())
             {
-                out.insert(exe_to_id[&name_str.to_string()].clone(), path);
+                out.push(path);
             }
         }
     }
