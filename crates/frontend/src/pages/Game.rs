@@ -24,6 +24,98 @@ use backend::{
     runners::Runner,
 };
 
+fn create_fade_animation(duration_ms: u64, ease: Ease, function: Function) -> UseAnimation<AnimNum> {
+    use_animation(move |_| {
+        AnimNum::new(0.0, 1.0)
+            .time(duration_ms)
+            .ease(ease)
+            .function(function)
+    })
+}
+
+fn get_animation_progress(anim: &UseAnimation<AnimNum>, default_value: f64) -> f64 {
+    if anim.is_running() {
+        anim.get().read().read() as f64
+    } else {
+        default_value
+    }
+}
+
+struct VideoFadeController {
+    loaded: Signal<bool>,
+    prev_url: Signal<Option<String>>,
+    prev_page: Signal<&'static str>,
+    animation: UseAnimation<AnimNum>,
+}
+
+impl VideoFadeController {
+    fn get_opacity(&self) -> f64 {
+        if *self.loaded.read() {
+            get_animation_progress(&self.animation, 1.0)
+        } else {
+            0.0
+        }
+    }
+    
+    fn mark_ready(&mut self) {
+        self.loaded.set(true);
+        self.animation.start();
+    }
+}
+
+fn use_video_fade(initial_url: Option<String>, initial_page: &'static str) -> VideoFadeController {
+    VideoFadeController {
+        loaded: use_signal(|| false),
+        prev_url: use_signal(|| initial_url),
+        prev_page: use_signal(|| initial_page),
+        animation: create_fade_animation(800, Ease::InOut, Function::Cubic),
+    }
+}
+
+struct PageTransitionController {
+    current: Signal<&'static str>,
+    target: Signal<&'static str>,
+    animation: UseAnimation<AnimNum>,
+}
+
+impl PageTransitionController {
+    fn get_opacity(&self) -> f64 {
+        if self.animation.is_running() {
+            let progress = self.animation.get().read().read() as f64;
+            if progress < 0.5 {
+                1.0 - (progress * 2.0)
+            } else {
+                (progress - 0.5) * 2.0
+            }
+        } else {
+            1.0
+        }
+    }
+    
+    fn trigger_transition(&mut self) {
+        if *self.target.read() != *self.current.read() && !self.animation.is_running() {
+            self.animation.start();
+        }
+    }
+    
+    fn update_current_page(&mut self) {
+        if self.animation.is_running() {
+            let progress = self.animation.get().read().read() as f64;
+            if progress >= 0.5 && *self.current.read() != *self.target.read() {
+                self.current.set(*self.target.read());
+            }
+        }
+    }
+}
+
+fn use_page_transition(initial_page: &'static str) -> PageTransitionController {
+    PageTransitionController {
+        current: use_signal(|| initial_page),
+        target: use_signal(|| initial_page),
+        animation: create_fade_animation(400, Ease::InOut, Function::Quad),
+    }
+}
+
 #[derive(Clone, PartialEq)]
 struct CrossfadeState {
     prev_url: Url,
@@ -31,18 +123,11 @@ struct CrossfadeState {
     fade_progress: f64,
 }
 
-// to-do: fix going back from gamesettings to game doesn't reset background crossfade properly
-
 fn use_crossfade_background(url: Url) -> CrossfadeState {
     let mut prev = use_signal(|| url.clone());
     let mut curr = use_signal(|| url.clone());
     
-    let anim = use_animation(|_| {
-        AnimNum::new(0.0, 1.0)
-            .time(500)
-            .ease(Ease::Out)
-            .function(Function::Quad)
-    });
+    let anim = create_fade_animation(700, Ease::InOut, Function::Cubic);
 
     let curr_url_str = curr.read().to_string();
     let new_url_str = url.to_string();
@@ -53,11 +138,7 @@ fn use_crossfade_background(url: Url) -> CrossfadeState {
         anim.start();
     }
 
-    let fade_progress = if anim.is_running() {
-        anim.get().read().read() as f64
-    } else {
-        1.0
-    };
+    let fade_progress = get_animation_progress(&anim, 1.0);
 
     CrossfadeState {
         prev_url: prev.read().clone(),
@@ -158,6 +239,7 @@ fn BackgroundLayers(
     video_opacity: f64,
     theme_url: Option<String>,
     static_bg_url: Url,
+    on_video_ready: EventHandler<()>,
 ) -> Element {
     rsx! {
         // Static background layer
@@ -223,6 +305,7 @@ fn BackgroundLayers(
                 VideoBackgroundPlayer {
                     key: "{video}",
                     video_url: video,
+                    on_ready: on_video_ready,
                 }
             }
         }
@@ -276,7 +359,7 @@ fn TopRightButtons() -> Element {
 
 #[component]
 fn BottomRightButtons(
-    current_page: Signal<&'static str>,
+    target_page: Signal<&'static str>,
 ) -> Element {
     rsx! {
         rect {
@@ -313,7 +396,7 @@ fn BottomRightButtons(
             }
             
             MyButton {
-                onpress: move |_| current_page.set("settings"),
+                onpress: move |_| target_page.set("settings"),
                 rect {
                     direction: "horizontal",
                     cross_align: "center",
@@ -341,14 +424,19 @@ pub fn Game() -> Element {
     let ctx = use_context::<Context>();
     let settings_sig = use_context::<Signal<Arc<RwLock<GlobalSettings>>>>();
     
-    let mut current_page = use_signal(|| "game");
     let mut prev_game_id = use_signal(|| None::<String>);
-
+    let mut page_ctrl = use_page_transition("game");
+    
     let current_game_id = selected_game_id.read().clone();
     if prev_game_id.read().as_ref() != current_game_id.as_ref() {
-        current_page.set("game");
+        page_ctrl.current.set("game");
+        page_ctrl.target.set("game");
         prev_game_id.set(current_game_id.clone());
     }
+
+    page_ctrl.trigger_transition();
+    page_ctrl.update_current_page();
+    let page_opacity = page_ctrl.get_opacity();
  
     let game_id = selected_game_id.read();
     let Some(ref game_id_str) = *game_id else {
@@ -398,39 +486,21 @@ pub fn Game() -> Element {
         })
     }).read().clone().unwrap_or((None, None));
 
-    let mut video_loaded = use_signal(|| false);
-    let video_fade_anim = use_animation(|_| {
-        AnimNum::new(0.0, 1.0)
-            .time(800)
-            .ease(Ease::Out)
-            .function(Function::Quad)
-    });
+    let mut video_ctrl = use_video_fade(video_url.clone(), *page_ctrl.current.read());
 
-    let mut prev_video_url = use_signal(|| video_url.clone());
-    if prev_video_url.read().as_ref() != video_url.as_ref() {
-        video_loaded.set(false);
-        prev_video_url.set(video_url.clone());
+    if video_ctrl.prev_url.read().as_ref() != video_url.as_ref() {
+        video_ctrl.loaded.set(false);
+        video_ctrl.prev_url.set(video_url.clone());
     }
 
-    use_effect(use_reactive!(|video_url| {
-        let current_video = video_url.clone();
-        if current_video.is_some() {
-            spawn(async move {
-                // to-do: actually detect when video is ready
-                tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
-                video_loaded.set(true);
-                video_fade_anim.start();
-            });
+    if *video_ctrl.prev_page.read() != *page_ctrl.current.read() {
+        video_ctrl.prev_page.set(*page_ctrl.current.read());
+        if *page_ctrl.current.read() == "game" {
+            video_ctrl.loaded.set(false);
         }
-    }));
-
-    let video_opacity = if video_fade_anim.is_running() {
-        video_fade_anim.get().read().read() as f64
-    } else if *video_loaded.read() {
-        1.0
-    } else {
-        0.0
-    };
+    }
+    
+    let video_opacity = video_ctrl.get_opacity();
 
     let mut news_carousel_index = use_signal(|| 0usize);
     let game_id_for_effect = game_id_str.clone();
@@ -453,10 +523,10 @@ pub fn Game() -> Element {
     
     let crossfade = use_crossfade_background(parsed_bg_url.clone());
 
-    if *current_page.read() != "game" {
+    if *page_ctrl.current.read() != "game" {
         return rsx! {
             GameSettings {
-                on_back: move |_| current_page.set("game"),
+                on_back: move |_| page_ctrl.target.set("game"),
                 background_url: crossfade.curr_url.clone(),
                 game_name: game_data.display.name.clone(),
             }
@@ -468,12 +538,23 @@ pub fn Game() -> Element {
             width: "fill",
             height: "fill",
 
-            BackgroundLayers {
-                crossfade: crossfade,
-                video_url: video_url,
-                video_opacity: video_opacity,
-                theme_url: theme_url,
-                static_bg_url: parsed_bg_url,
+            rect {
+                position: "absolute",
+                position_top: "0",
+                position_left: "0",
+                width: "100%",
+                height: "100%",
+                opacity: "{page_opacity}",
+                BackgroundLayers {
+                    crossfade: crossfade,
+                    video_url: video_url,
+                    video_opacity: video_opacity,
+                    theme_url: theme_url,
+                    static_bg_url: parsed_bg_url,
+                    on_video_ready: move |_| {
+                        video_ctrl.mark_ready();
+                    },
+                }
             }
 
             TopRightButtons {}
@@ -510,7 +591,7 @@ pub fn Game() -> Element {
             }
                 
             BottomRightButtons {
-                current_page: current_page,
+                target_page: page_ctrl.target,
             }
         }
     }

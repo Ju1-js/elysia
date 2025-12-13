@@ -13,7 +13,10 @@ struct VideoFrame {
 }
 
 #[component]
-pub fn VideoBackgroundPlayer(video_url: String) -> Element {
+pub fn VideoBackgroundPlayer(
+    video_url: String,
+    on_ready: EventHandler<()>,
+) -> Element {
     let platform = use_platform();
     let current_frame = use_signal(|| Arc::new(Mutex::new(None::<VideoFrame>)));
     let mut should_stop = use_signal(|| Arc::new(AtomicBool::new(false)));
@@ -37,8 +40,16 @@ pub fn VideoBackgroundPlayer(video_url: String) -> Element {
         stop_flag.store(false, Ordering::Relaxed);
         
         spawn(async move {
-            if let Err(e) = stream_video_frames(url, frame_store, stop_flag).await {
-                eprintln!("Video playback error: {}", e);
+            let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+
+            spawn(async move {
+                if let Err(e) = stream_video_frames(url, frame_store, stop_flag, ready_tx).await {
+                    eprintln!("Video playback error: {}", e);
+                }
+            });
+
+            if ready_rx.await.is_ok() {
+                on_ready.call(());
             }
         });
     });
@@ -135,6 +146,7 @@ async fn stream_video_frames(
     url: String,
     frame_store: Arc<Mutex<Option<VideoFrame>>>,
     should_stop: Arc<AtomicBool>,
+    first_frame_ready: tokio::sync::oneshot::Sender<()>,
 ) -> Result<(), String> {
 
     let video_path = download_video(&url).await?;
@@ -176,6 +188,8 @@ async fn stream_video_frames(
             frame_rate.1 as f64 / frame_rate.0 as f64
         );
         
+        let mut first_frame_ready_tx = Some(first_frame_ready);
+        
         'outer: loop {
             if should_stop.load(Ordering::Relaxed) {
                 break;
@@ -216,6 +230,10 @@ async fn stream_video_frames(
                             width,
                             height,
                         });
+
+                        if let Some(tx) = first_frame_ready_tx.take() {
+                            let _ = tx.send(());
+                        }
 
                         std::thread::sleep(frame_duration);
                     }
