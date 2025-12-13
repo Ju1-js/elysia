@@ -5,7 +5,6 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use ffmpeg_next as ffmpeg;
 
-// State for holding the current video frame as raw pixels
 #[derive(Clone)]
 struct VideoFrame {
     pixels: Arc<Vec<u8>>,
@@ -17,32 +16,39 @@ struct VideoFrame {
 pub fn VideoBackgroundPlayer(video_url: String) -> Element {
     let platform = use_platform();
     let current_frame = use_signal(|| Arc::new(Mutex::new(None::<VideoFrame>)));
-    let should_stop = use_signal(|| Arc::new(AtomicBool::new(false)));
+    let mut should_stop = use_signal(|| Arc::new(AtomicBool::new(false)));
+    let mut current_url = use_signal(|| video_url.clone());
+
+    if *current_url.read() != video_url {
+
+        should_stop.read().store(true, Ordering::Relaxed);
+        
+        *current_frame.read().lock().unwrap() = None;
+        current_url.set(video_url.clone());
+        
+        should_stop.set(Arc::new(AtomicBool::new(false)));
+    }
     
-    // Start video decoder in background - runs once per component instance
     use_effect(move || {
-        let url = video_url.clone();
+        let url = current_url.read().clone();
         let frame_store = current_frame.read().clone();
         let stop_flag = should_stop.read().clone();
         
-        // Reset stop flag for new video
         stop_flag.store(false, Ordering::Relaxed);
         
         spawn(async move {
-            if let Err(e) = stream_video_frames(url.clone(), frame_store, stop_flag).await {
+            if let Err(e) = stream_video_frames(url, frame_store, stop_flag).await {
                 eprintln!("Video playback error: {}", e);
             }
         });
     });
 
-    // Cleanup on unmount - this is the key to stopping old videos
     use_drop(move || {
         should_stop.read().store(true, Ordering::Relaxed);
     });
     
     let (reference, size) = use_node_signal();
     
-    // Ticker to drive frame updates
     use_hook(|| {
         let mut ticker = platform.new_ticker();
         spawn(async move {
@@ -53,8 +59,7 @@ pub fn VideoBackgroundPlayer(video_url: String) -> Element {
             }
         });
     });
-    
-    // Canvas rendering with high-quality scaling
+
     let canvas = use_canvas(move || {
         let frame_store = current_frame.read().clone();
         move |ctx| {
@@ -63,7 +68,6 @@ pub fn VideoBackgroundPlayer(video_url: String) -> Element {
             let frame_guard = frame_store.lock().unwrap();
             
             if let Some(frame) = frame_guard.as_ref() {
-                // Create Skia image from raw RGBA pixels
                 let info = ImageInfo::new(
                     (frame.width as i32, frame.height as i32),
                     ColorType::RGBA8888,
@@ -78,15 +82,14 @@ pub fn VideoBackgroundPlayer(video_url: String) -> Element {
                     data,
                     (frame.width * 4) as usize,
                 ) {
-                    // Draw the image to fill the canvas area with high-quality scaling
+
                     let dest_rect = skia_safe::Rect::from_xywh(
                         ctx.area.min_x(),
                         ctx.area.min_y(),
                         ctx.area.width(),
                         ctx.area.height(),
                     );
-                    
-                    // Use high-quality sampling for better upscaling
+
                     let sampling = SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear);
                     
                     let mut paint = skia_safe::Paint::default();
@@ -94,14 +97,13 @@ pub fn VideoBackgroundPlayer(video_url: String) -> Element {
                     
                     ctx.canvas.draw_image_rect_with_sampling_options(
                         image,
-                        None, // src rect (None = full image)
+                        None,
                         dest_rect,
                         sampling,
                         &paint,
                     );
                 }
             } else {
-                // Draw placeholder while loading
                 let mut paint = skia_safe::Paint::default();
                 paint.set_color(skia_safe::Color::from_rgb(20, 20, 20));
                 ctx.canvas.draw_rect(
@@ -129,24 +131,21 @@ pub fn VideoBackgroundPlayer(video_url: String) -> Element {
     }
 }
 
-// Background task that decodes video and updates the frame store
 async fn stream_video_frames(
     url: String,
     frame_store: Arc<Mutex<Option<VideoFrame>>>,
     should_stop: Arc<AtomicBool>,
 ) -> Result<(), String> {
-    // Download video first
+
     let video_path = download_video(&url).await?;
-    
-    // FFmpeg decoding in blocking task
+
     tokio::task::spawn_blocking(move || -> Result<(), String> {
         // Suppress FFmpeg logs
         ffmpeg::init().map_err(|e| e.to_string())?;
         ffmpeg::util::log::set_level(ffmpeg::util::log::Level::Quiet);
         
         let mut ictx = ffmpeg::format::input(&video_path).map_err(|e| e.to_string())?;
-        
-        // Find video stream (ignore audio)
+
         let video_stream = ictx.streams()
             .best(ffmpeg::media::Type::Video)
             .ok_or("No video stream found")?;
@@ -155,8 +154,7 @@ async fn stream_video_frames(
         let context_decoder = ffmpeg::codec::context::Context::from_parameters(video_stream.parameters())
             .map_err(|e| e.to_string())?;
         let mut decoder = context_decoder.decoder().video().map_err(|e| e.to_string())?;
-        
-        // Use original resolution for better quality
+
         let target_width = decoder.width();
         let target_height = decoder.height();
         
@@ -167,20 +165,18 @@ async fn stream_video_frames(
             ffmpeg::format::Pixel::RGBA,
             target_width,
             target_height,
-            ffmpeg::software::scaling::Flags::LANCZOS, // High-quality scaling
+            ffmpeg::software::scaling::Flags::LANCZOS,
         ).map_err(|e| e.to_string())?;
         
         let mut decoded_frame = ffmpeg::util::frame::Video::empty();
         let mut rgb_frame = ffmpeg::util::frame::Video::empty();
         
-        // Calculate frame delay for FPS
-        let frame_rate = decoder.frame_rate().unwrap_or((30, 1).into());
+        let frame_rate = decoder.frame_rate().unwrap_or((60, 1).into());
         let frame_duration = std::time::Duration::from_secs_f64(
             frame_rate.1 as f64 / frame_rate.0 as f64
         );
         
         'outer: loop {
-            // Check if we should stop
             if should_stop.load(Ordering::Relaxed) {
                 break;
             }
@@ -188,26 +184,21 @@ async fn stream_video_frames(
             let mut packets_exhausted = true;
             
             for (stream, packet) in ictx.packets() {
-                // Check stop flag during packet processing
                 if should_stop.load(Ordering::Relaxed) {
                     break 'outer;
                 }
-                
-                // Only process video packets, ignore audio
+
                 if stream.index() == video_stream_index {
                     packets_exhausted = false;
                     decoder.send_packet(&packet).map_err(|e| e.to_string())?;
                     
                     while decoder.receive_frame(&mut decoded_frame).is_ok() {
-                        // Check stop flag during frame decoding
                         if should_stop.load(Ordering::Relaxed) {
                             break 'outer;
                         }
-                        
-                        // Convert to RGBA
+
                         scaler.run(&decoded_frame, &mut rgb_frame).map_err(|e| e.to_string())?;
-                        
-                        // Copy pixel data
+
                         let width = rgb_frame.width();
                         let height = rgb_frame.height();
                         let stride = rgb_frame.stride(0);
@@ -219,27 +210,23 @@ async fn stream_video_frames(
                             let row_end = row_start + (width * 4) as usize;
                             pixels.extend_from_slice(&data[row_start..row_end]);
                         }
-                        
-                        // Update frame store
+
                         *frame_store.lock().unwrap() = Some(VideoFrame {
                             pixels: Arc::new(pixels),
                             width,
                             height,
                         });
-                        
-                        // Frame pacing
+
                         std::thread::sleep(frame_duration);
                     }
                 }
             }
-            
-            // Loop video - seek to beginning
+
             if packets_exhausted {
                 ictx.seek(0, ..).map_err(|e| e.to_string())?;
             }
         }
-        
-        // Clean up downloaded file
+
         let _ = std::fs::remove_file(&video_path);
         
         Ok(())

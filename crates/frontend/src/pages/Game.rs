@@ -11,15 +11,16 @@ use crate::{
         MyNetworkImage, 
         MyNewsWidget,
         VideoBackgroundPlayer,
-        get_video_url,
-        get_theme_url,
     },
     pages::GameSettings,
     context::Context,
 };
 use backend::{
     settings::GlobalSettings,
-    game_providers::installer::InstallerManager,
+    game_providers::{
+        installer::InstallerManager,
+        hoyoplay::{get_video_url, get_theme_url},
+    },
     runners::Runner,
 };
 

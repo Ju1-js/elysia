@@ -8,7 +8,7 @@ use std::{
 };
 
 use md5::Digest;
-use proto::{ApiResponse, Game, GetGameContent, GetGames, GetAllGameBasicInfo};
+use proto::{ApiResponse, Game, GetGameContent, GetGames, GetAllGameBasicInfo, Background};
 use reqwest;
 use serde::{Deserialize, Serialize};
 use tokio::{fs::File, io::AsyncReadExt};
@@ -199,4 +199,23 @@ where
     let _ = cacache::write_sync(cache_path, url, serde_json::to_vec(&response.data).unwrap());
 
     Ok(response.data)
+}
+
+pub fn get_video_url(backgrounds: &[Background]) -> Option<String> {
+    backgrounds
+        .iter()
+        .find_map(|bg| {
+            if !bg.video.url.is_empty() {
+                Some(bg.video.url.clone())
+            } else {
+                None
+            }
+        })
+}
+
+pub fn get_theme_url(backgrounds: &[Background]) -> Option<String> {
+    backgrounds
+        .first()
+        .map(|bg| bg.theme.url.clone())
+        .filter(|url| !url.is_empty())
 }
