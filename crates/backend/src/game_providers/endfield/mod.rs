@@ -1,6 +1,7 @@
 mod installer;
 mod download;
 pub mod api;
+mod proto;
 
 pub use installer::EndfieldInstaller;
 pub use download::{Progress, get_progress, set_progress, clear_progress};
