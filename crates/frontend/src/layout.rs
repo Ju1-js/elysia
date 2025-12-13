@@ -39,10 +39,9 @@ fn FromRouteToCurrent(
     let animations = use_animation_with_dependencies(&upwards, move |_conf, _upwards| {
         AnimNum::new(1.0, 0.0)
             .time(800)
-            .ease(Ease::InOut)
+            .ease(Ease::Out)
             .function(Function::Cubic)
     });
-
 
     use_memo(use_reactive((&upwards, &from), move |_| {
         animations.run(AnimDirection::Forward)
@@ -100,7 +99,6 @@ fn AnimatedOutlet(children: Element) -> Element {
     rsx!(
         rect {
             reference,
-            // FIXME: this resets state before and after the animation
             if let Some((from, upwards)) = from_route {
                 FromRouteToCurrent { upwards, from, node_size }
             } else {
@@ -130,7 +128,7 @@ fn make_links(
                     key: "{game_id}",
                     onclick: move |_| {
                         selected_game_id_mut.write().replace(game_id.clone());
-                        nav.push(Route::Game); // Navigate immediately for smooth transition
+                        nav.push(Route::Game);
                     },
                     MySidebarItem {
                         is_active: is_active,
@@ -239,7 +237,6 @@ fn AppLayout() -> Element {
                             
                             rect {
                                 onclick: move |_| {
-                                    // TODO: Open website link
                                     println!("Elysia logo clicked - add website URL here");
                                 },
                                 MySidebarItem {
@@ -262,21 +259,6 @@ fn AppLayout() -> Element {
                         
                         Body {
                             AnimatedOutlet { }
-                        }
-                        
-                        rect {
-                            position: "absolute",
-                            position_top: "0",
-                            position_left: "0",
-                            width: "100%",
-                            height: "100%",
-                            direction: "horizontal",
-                            main_align: "end",
-                            cross_align: "start",
-                            spacing: "20",
-                            padding: "32",
-                            layer: "-4",
-                            
                         }
                     }
                 }

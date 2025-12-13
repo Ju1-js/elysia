@@ -24,11 +24,14 @@ use backend::{
     runners::Runner,
 };
 
+#[derive(Clone, PartialEq)]
 struct CrossfadeState {
     prev_url: Url,
     curr_url: Url,
     fade_progress: f64,
 }
+
+// to-do: fix going back from gamesettings to game doesn't reset background crossfade properly
 
 fn use_crossfade_background(url: Url) -> CrossfadeState {
     let mut prev = use_signal(|| url.clone());
@@ -36,9 +39,9 @@ fn use_crossfade_background(url: Url) -> CrossfadeState {
     
     let anim = use_animation(|_| {
         AnimNum::new(0.0, 1.0)
-            .time(700)
-            .ease(Ease::InOut)
-            .function(Function::Cubic)
+            .time(500)
+            .ease(Ease::Out)
+            .function(Function::Quad)
     });
 
     let curr_url_str = curr.read().to_string();
@@ -149,6 +152,190 @@ fn check_game_installed(
 }
 
 #[component]
+fn BackgroundLayers(
+    crossfade: CrossfadeState,
+    video_url: Option<String>,
+    video_opacity: f64,
+    theme_url: Option<String>,
+    static_bg_url: Url,
+) -> Element {
+    rsx! {
+        // Static background layer
+        rect {
+            position: "absolute",
+            position_top: "0",
+            position_left: "0",
+            width: "100%",
+            height: "100%",
+            main_align: "start",
+            cross_align: "start",
+            layer: "4",
+            MyNetworkImage {
+                url: static_bg_url,
+                sampling: "trilinear",
+            }
+        }
+
+        // Previous crossfade image
+        rect {
+            position: "absolute",
+            position_top: "0",
+            position_left: "0",
+            width: "100%",
+            height: "100%",
+            main_align: "end",
+            cross_align: "end",
+            layer: "3",
+            opacity: "{1.0 - crossfade.fade_progress}",
+            MyNetworkImage {
+                url: crossfade.prev_url,
+                sampling: "trilinear",
+            }
+        }
+
+        // Current crossfade image
+        rect {
+            position: "absolute",
+            position_top: "0",
+            position_left: "0",
+            width: "100%",
+            height: "100%",
+            main_align: "end",
+            cross_align: "end",
+            layer: "3",
+            opacity: "{crossfade.fade_progress * (1.0 - video_opacity)}",
+            MyNetworkImage {
+                url: crossfade.curr_url,
+                sampling: "trilinear",
+            }
+        }
+
+        // Video layer
+        if let Some(video) = video_url {
+            rect {
+                position: "absolute",
+                position_top: "0",
+                position_left: "0",
+                width: "100%",
+                height: "100%",
+                layer: "2",
+                opacity: "{video_opacity}",
+                VideoBackgroundPlayer {
+                    key: "{video}",
+                    video_url: video,
+                }
+            }
+        }
+
+        // Theme layer
+        if let Some(theme) = theme_url {
+            if let Ok(theme_url_parsed) = theme.parse::<Url>() {
+                rect {
+                    position: "absolute",
+                    position_top: "0",
+                    position_left: "0",
+                    width: "100%",
+                    height: "100%",
+                    layer: "1",
+                    MyNetworkImage {
+                        url: theme_url_parsed,
+                        sampling: "trilinear",
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn TopRightButtons() -> Element {
+    rsx! {
+        rect {
+            position: "absolute",
+            position_top: "32",
+            position_left: "0",
+            width: "100%",
+            height: "0",
+            direction: "horizontal",
+            main_align: "end",
+            padding: "0 32",
+            layer: "-1",
+            
+            MyButton {
+                onpress: move |_| println!("Meow clicked!"),
+                label {
+                    font_size: "16",
+                    font_weight: "500",
+                    color: "white",
+                    "Meow 🐾"
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn BottomRightButtons(
+    current_page: Signal<&'static str>,
+) -> Element {
+    rsx! {
+        rect {
+            position: "absolute",
+            position_top: "0",
+            position_left: "0",
+            width: "100%",
+            height: "100%",
+            direction: "horizontal",
+            main_align: "end",
+            cross_align: "end",
+            spacing: "12",
+            padding: "32",
+            layer: "-1",
+            
+            MyButton {
+                onpress: move |_| println!("Game tracker clicked!"),
+                rect {
+                    direction: "horizontal",
+                    cross_align: "center",
+                    spacing: "8",
+                    svg {
+                        width: "20",
+                        height: "20",
+                        svg_content: r#"<svg viewBox="0 0 24 24" fill="white"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.5-13H11v6l5.2 3.2.8-1.3-4.5-2.7V7z"/></svg>"#
+                    }
+                    label {
+                        font_size: "16",
+                        font_weight: "500",
+                        color: "white",
+                        "2h 34m"
+                    }
+                }
+            }
+            
+            MyButton {
+                onpress: move |_| current_page.set("settings"),
+                rect {
+                    direction: "horizontal",
+                    cross_align: "center",
+                    spacing: "8",
+                    svg {
+                        width: "20",
+                        height: "20",
+                        svg_content: r#"<svg viewBox="0 0 24 24" fill="white"><path d="M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97 0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1 0 .33.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66z"/></svg>"#
+                    }
+                    label {
+                        font_size: "16",
+                        font_weight: "500",
+                        color: "white",
+                        "Game Settings"
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
 pub fn Game() -> Element {
     let selected_game_id = use_context::<Signal<Option<String>>>();
     let ctx = use_context::<Context>();
@@ -178,7 +365,6 @@ pub fn Game() -> Element {
         };
     };
 
-    // Get static background URL
     let bg_url = use_memo(move || {
         let game_id = selected_game_id.read();
         game_id.as_ref().and_then(|id| {
@@ -198,7 +384,6 @@ pub fn Game() -> Element {
         };
     };
 
-    // Get video and theme URLs from API
     let (video_url, theme_url) = use_memo(move || {
         let game_id = selected_game_id.read();
         game_id.as_ref().and_then(|id| {
@@ -213,28 +398,25 @@ pub fn Game() -> Element {
         })
     }).read().clone().unwrap_or((None, None));
 
-    // Video fade-in state
     let mut video_loaded = use_signal(|| false);
     let video_fade_anim = use_animation(|_| {
         AnimNum::new(0.0, 1.0)
-            .time(1000)
-            .ease(Ease::InOut)
-            .function(Function::Cubic)
+            .time(800)
+            .ease(Ease::Out)
+            .function(Function::Quad)
     });
 
-    // Track video URL changes and reset video_loaded
     let mut prev_video_url = use_signal(|| video_url.clone());
     if prev_video_url.read().as_ref() != video_url.as_ref() {
         video_loaded.set(false);
         prev_video_url.set(video_url.clone());
     }
 
-    // Start fade when video is loaded (simulated after a delay)
     use_effect(use_reactive!(|video_url| {
         let current_video = video_url.clone();
         if current_video.is_some() {
             spawn(async move {
-                // Wait for video to start playing (simulate initial buffering)
+                // to-do: actually detect when video is ready
                 tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
                 video_loaded.set(true);
                 video_fade_anim.start();
@@ -250,7 +432,7 @@ pub fn Game() -> Element {
         0.0
     };
 
-    let mut news_carousel_index = use_signal(|| 0);
+    let mut news_carousel_index = use_signal(|| 0usize);
     let game_id_for_effect = game_id_str.clone();
     use_effect(use_reactive!(|game_id_for_effect| {
         let _ = game_id_for_effect;
@@ -269,7 +451,7 @@ pub fn Game() -> Element {
         game_data.biz.clone()
     );
     
-    let crossfade = use_crossfade_background(parsed_bg_url);
+    let crossfade = use_crossfade_background(parsed_bg_url.clone());
 
     if *current_page.read() != "game" {
         return rsx! {
@@ -285,107 +467,17 @@ pub fn Game() -> Element {
         rect {
             width: "fill",
             height: "fill",
-            
-            // LAYER 1: Previous static background (fading out)
-            rect {
-                position: "absolute",
-                position_top: "0",
-                position_left: "0",
-                width: "100%",
-                height: "100%",
-                layer: "3",
-                opacity: "{1.0 - crossfade.fade_progress}",
-                MyNetworkImage {
-                    url: crossfade.prev_url,
-                    sampling: "trilinear",
-                }
+
+            BackgroundLayers {
+                crossfade: crossfade,
+                video_url: video_url,
+                video_opacity: video_opacity,
+                theme_url: theme_url,
+                static_bg_url: parsed_bg_url,
             }
+
+            TopRightButtons {}
             
-            // LAYER 2: Current static background (fading in, always visible until video loads)
-            rect {
-                position: "absolute",
-                position_top: "0",
-                position_left: "0",
-                width: "100%",
-                height: "100%",
-                layer: "3",
-                opacity: "{crossfade.fade_progress * (1.0 - video_opacity)}",
-                MyNetworkImage {
-                    url: crossfade.curr_url.clone(),
-                    sampling: "trilinear",
-                }
-            }
-            
-            // LAYER 3: Video background (fades in when loaded)
-            if let Some(video) = video_url {
-                rect {
-                    position: "absolute",
-                    position_top: "0",
-                    position_left: "0",
-                    width: "100%",
-                    height: "100%",
-                    layer: "2",
-                    opacity: "{video_opacity}",
-                    
-                    VideoBackgroundPlayer {
-                        key: "{video}",
-                        video_url: video,
-                    }
-                }
-            }
-            
-            // LAYER 4: Theme overlay (on top of video)
-            rect {
-                position: "absolute",
-                position_top: "0",
-                position_left: "0",
-                width: "100%",
-                height: "100%",
-                layer: "1",
-                
-                if let Some(theme) = theme_url {
-                    if let Ok(theme_url_parsed) = theme.parse::<Url>() {
-                        MyNetworkImage {
-                            url: theme_url_parsed,
-                            sampling: "trilinear",
-                        }
-                    }
-                }
-            }
-            
-            // LAYER 5: UI Elements
-            
-            // Top-right buttons
-            rect {
-                position: "absolute",
-                position_top: "0",
-                position_left: "0",
-                width: "100%",
-                height: "100%",
-                direction: "horizontal",
-                main_align: "end",
-                cross_align: "start",
-                spacing: "20",
-                padding: "32",
-                layer: "-1",
-                
-                MyButton {
-                    onpress: move |_| println!("Meow clicked!"),
-                    rect {
-                        direction: "horizontal",
-                        cross_align: "center",
-                        spacing: "8",
-                        label {
-                            font_size: "16",
-                            font_weight: "500",
-                            color: "white",
-                            "Meow 🐾"
-                        }
-                    }
-                }
-            }
-            
-            // Left sidebar
             rect {
                 position: "absolute",
                 position_top: "0",
@@ -417,64 +509,8 @@ pub fn Game() -> Element {
                 }
             }
                 
-            // Bottom-right buttons
-            rect {
-                position: "absolute",
-                position_top: "0",
-                position_left: "0",
-                width: "100%",
-                height: "100%",
-                direction: "horizontal",
-                main_align: "end",
-                cross_align: "end",
-                spacing: "12",
-                padding: "32",
-                layer: "-1",
-                
-                MyButton {
-                    onpress: move |_| println!("Game tracker clicked!"),
-                    rect {
-                        direction: "horizontal",
-                        cross_align: "center",
-                        spacing: "8",
-                        
-                        svg {
-                            width: "20",
-                            height: "20",
-                            svg_content: r#"<svg viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg">
-                                <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.5-13H11v6l5.2 3.2.8-1.3-4.5-2.7V7z"/>
-                            </svg>"#
-                        }
-                        label {
-                            font_size: "16",
-                            font_weight: "500",
-                            color: "white",
-                            "2h 34m"
-                        }
-                    }
-                }
-                
-                MyButton {
-                    onpress: move |_| current_page.set("settings"),
-                    rect {
-                        direction: "horizontal",
-                        cross_align: "center",
-                        spacing: "8",
-                        svg {
-                            width: "20",
-                            height: "20",
-                            svg_content: r#"<svg viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg">
-                                <path d="M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97 0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1 0 .33.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66z"/>
-                            </svg>"#
-                        }
-                        label {
-                            font_size: "16",
-                            font_weight: "500",
-                            color: "white",
-                            "Game Settings"
-                        }
-                    }
-                }
+            BottomRightButtons {
+                current_page: current_page,
             }
         }
     }
