@@ -1,19 +1,32 @@
-mod installer;
-mod download;
 pub mod api;
+mod download;
+mod installer;
 mod proto;
 
+pub use download::{Progress, clear_progress, get_progress, set_progress};
 pub use installer::EndfieldInstaller;
-pub use download::{Progress, get_progress, set_progress, clear_progress};
 
 use std::path::{Path, PathBuf};
-use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
-use serde_json::Value;
-use crate::game_providers::hoyoplay::proto::{
-    Banner, Content, Display, Game, GameInfo, GetGameContent, GetGames, Image, ImageLink,
-    Post, SocialMedia,
+
+use async_trait::async_trait;
+use reqwest::{
+    Url,
+    header::{CONTENT_TYPE, HeaderMap, HeaderValue},
 };
-use api::BatchProxyResponse;
+use serde_json::Value;
+
+use crate::{
+    game_providers::{
+        self, GameProvider,
+        endfield::api::BatchProxyResponse,
+        game_info::{GameBackground, GameEdition, GameVisuals},
+        hoyoplay::proto::{
+            Banner, Content, Display, Game, GameInfo, GetGameContent, GetGames, Image, ImageLink,
+            Post, SocialMedia,
+        },
+    },
+    settings::GlobalSettings,
+};
 
 const BASE_URL: &str = "https://launcher.gryphline.com";
 
@@ -277,4 +290,45 @@ pub async fn get_game_content(game_id: &str) -> Result<GetGameContent, String> {
     };
 
     Ok(GetGameContent { content })
+}
+
+pub struct EndfieldProvider {}
+
+#[async_trait]
+impl GameProvider for EndfieldProvider {
+    async fn fetch_games(
+        &self,
+        _settings: &GlobalSettings,
+    ) -> anyhow::Result<Vec<game_providers::GameInfo>> {
+        let app_code = "zePXHT2t4L2tKR4m";
+
+        let bg_image = get_main_bg_image(app_code).await.unwrap_or_default();
+
+        let bg_image_url = Url::parse(&bg_image)?;
+
+        let icon = "https://play-lh.googleusercontent.com/l6FVNa293RykBWy88TqEhUakIcGSC8bRygSnKOBgztln48JX-WzMWnrBAETrKZsxDNC4HhwCsvfle_UI7rBE=w960-h1920-rw";
+
+        let icon_url = Url::parse(icon)?;
+
+        let endfield = game_providers::GameInfo {
+            id: "endfield".to_string(),
+            name: "Arknights: Endfield".to_string(),
+            editions: vec![GameEdition {
+                name: "Global".to_string(),
+                id: app_code.to_string(),
+            }],
+            visuals: GameVisuals {
+                background: GameBackground::Image(game_providers::game_info::Image {
+                    url: bg_image_url,
+                    size: None,
+                }),
+                icon: game_providers::game_info::Image {
+                    url: icon_url,
+                    size: None,
+                },
+            },
+        };
+
+        Ok(vec![endfield])
+    }
 }

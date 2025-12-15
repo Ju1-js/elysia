@@ -3,18 +3,21 @@ pub mod proto;
 use std::{
     collections::{HashMap, HashSet},
     fs::read_dir,
-    io::Read,
     path::{Path, PathBuf},
 };
 
-use md5::Digest;
-use proto::{ApiResponse, Game, GetGameContent, GetGames, GetAllGameBasicInfo, Background};
-use reqwest;
+use async_trait::async_trait;
+use proto::{ApiResponse, Background, GetAllGameBasicInfo, GetGameContent, GetGames};
+use reqwest::{self, Url};
 use serde::{Deserialize, Serialize};
 use tokio::{fs::File, io::AsyncReadExt};
 
 use crate::{
-    game_providers::hoyoplay::proto::{GameExe, GameInfo, GetGameConfigs, GetGameScanInfo},
+    game_providers::{
+        self, GameProvider,
+        game_info::{GameBackground, GameEdition, GameVisuals},
+        hoyoplay::proto::{GetGameConfigs, GetGameScanInfo},
+    },
     settings::GlobalSettings,
 };
 
@@ -74,7 +77,7 @@ pub async fn get_game_video_backgrounds(
     game_id: &str,
 ) -> Result<Vec<String>, String> {
     let basic_info = get_all_game_basic_info(settings, Some(game_id)).await?;
-    
+
     let mut video_urls = Vec::new();
     for game_info in basic_info.game_info_list {
         if game_info.game.id == game_id {
@@ -86,7 +89,7 @@ pub async fn get_game_video_backgrounds(
             break;
         }
     }
-    
+
     Ok(video_urls)
 }
 
@@ -218,4 +221,65 @@ pub fn get_theme_url(backgrounds: &[Background]) -> Option<String> {
         .first()
         .map(|bg| bg.theme.url.clone())
         .filter(|url| !url.is_empty())
+}
+
+pub struct HoyoplayProvider {}
+
+#[async_trait]
+impl GameProvider for HoyoplayProvider {
+    async fn fetch_games(
+        &self,
+        settings: &GlobalSettings,
+    ) -> anyhow::Result<Vec<game_providers::GameInfo>> {
+
+
+        let games =  get_games(settings).await.map_err(|e| anyhow::anyhow!(e))?;
+        let basic_info = get_all_game_basic_info(settings, None).await.map_err(|e| anyhow::anyhow!(e))?;
+
+        let mut background_map: HashMap<String, GameBackground> = basic_info.game_info_list.iter().map(|info| {
+            let id = info.game.id.to_owned();
+            let mut backgrounds = info.backgrounds.iter().map(|b| {
+                if b.background_type == "BACKGROUND_TYPE_VIDEO" {
+                    let url = Url::parse(&b.video.url).unwrap();
+                    let overlay = Url::parse(&b.theme.url).unwrap();
+                    let fallback = Url::parse(&b.background.url).unwrap();
+                    GameBackground::Video(game_providers::game_info::Video {
+                        url,
+                        overlay: Some(overlay),
+                        fallback,
+                        size: None,
+                        framerate: None })
+                } else {
+                    let url = Url::parse(&b.background.url).unwrap();
+                    GameBackground::Image(game_providers::game_info::Image {
+                        url,
+                        size: None })
+                }
+            });
+
+            let bg = backgrounds.next().unwrap();
+            (id, bg)
+        }).collect();
+
+        let infos = games.games.iter().map(|game| {
+            let background = background_map.remove(&game.id).unwrap();
+
+            game_providers::GameInfo {
+                id: game.id.to_owned(),
+                name: game.display.name.to_owned(),
+                editions: game.game_server_configs.iter().map(|cfg| GameEdition {
+                    name: cfg.i18n_name.to_owned(),
+                    id: cfg.game_id.to_owned(),
+                }).collect(),
+                visuals: GameVisuals {
+                    background,
+                    icon: game_providers::game_info::Image {
+                        url: Url::parse(&game.display.icon.url).unwrap(),
+                        size: None,
+                    },
+                },
+            }
+        }).collect();
+        Ok(infos)
+    }
 }

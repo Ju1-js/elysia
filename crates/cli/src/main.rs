@@ -1,8 +1,9 @@
-use std::{env, path::PathBuf};
+use std::{env, path::PathBuf, time::Instant};
 
 use anyhow::{Result, anyhow};
 
 use backend::{
+    game_manager::GameManager,
     settings::GlobalSettings,
     task_manager::{
         Task, TaskManager, TaskStatus,
@@ -59,6 +60,9 @@ async fn run_verb(settings: &GlobalSettings, verb: &str, args: &[String]) -> Res
         "gf2" => {
             run_gf2(settings).await?;
         }
+        "init" => {
+            run_init(settings).await?;
+        }
         _ => {
             println!("Unknown verb: {}", verb);
         }
@@ -76,6 +80,8 @@ fn run_help() {
     println!("      Scan a directory for games");
     println!("  gf2");
     println!("      For testing: streaming extract the GF2: Exilum archive to temp");
+    println!("  init");
+    println!("      Test Game Manager init");
 }
 
 async fn run_scan(settings: &GlobalSettings, path: Option<&String>) -> Result<()> {
@@ -142,6 +148,33 @@ async fn run_gf2(settings: &GlobalSettings) -> Result<()> {
         }
     })
     .await;
+
+    Ok(())
+}
+
+async fn run_init(settings: &GlobalSettings) -> Result<()> {
+    let mut manager = GameManager::new();
+
+    let start = Instant::now();
+
+    manager.init(settings).await?;
+
+    for game in manager.games {
+        println!("Game: {}", game.name);
+        println!("\tId: {}", game.id);
+        println!(
+            "\tEditions: {}",
+            game.editions
+                .into_iter()
+                .map(|edition| format!("{} [{}]", edition.name, edition.id))
+                .collect::<Vec<String>>()
+                .join(", ")
+        );
+    }
+
+    let duration = start.elapsed();
+
+    println!("Initialization took {:?}", duration);
 
     Ok(())
 }
