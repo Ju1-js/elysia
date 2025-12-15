@@ -1,12 +1,10 @@
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{RwLock, Weak};
 use async_trait::async_trait;
-use crate::settings::{InstalledGame, GlobalSettings};
+use crate::settings::{InstalledGame};
 use crate::runners::{Runners, Proton};
 use crate::game_providers::installer::GameInstaller;
-use crate::game_providers::Progress;
 
 pub struct EndfieldInstaller {
     pub appcode: String,
