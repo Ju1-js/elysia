@@ -60,24 +60,32 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
         shadow: _,
     } = use_applied_theme!(&None, filled_button);
 
-    let progress_sig = use_signal(|| None::<DownloadProgress>);
+    let mut progress_sig = use_signal(|| None::<DownloadProgress>);
+    let mut installed_sig = use_signal(|| installed);
+
+    use_effect(use_reactive!(|installed| {
+        installed_sig.set(installed);
+    }));
 
     {
-        let sig = progress_sig;
         let key = progress_key.clone();
         let get_progress = get_progress.clone();
-        let _ = use_resource(move || {
+        use_future(move || {
             let key = key.clone();
-            let mut sig = sig;
             let get_progress = get_progress.clone();
             async move {
                 loop {
                     let p = get_progress(&key);
-                    *sig.write() = p;
+
+                    if let Some(progress) = &p {
+                        if !progress.is_busy && progress.downloaded == progress.total && progress.total > 0 {
+                            installed_sig.set(true);
+                        }
+                    }
+                    
+                    progress_sig.set(p);
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 }
-                #[allow(unreachable_code)]
-                ()
             }
         });
     }
@@ -164,7 +172,7 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
         rsx!({})
     };
 
-    let button_label = if installed {
+    let button_label = if *installed_sig.read() {
         "Start Game"
     } else {
         "Download Game"

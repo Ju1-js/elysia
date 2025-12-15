@@ -218,7 +218,29 @@ fn create_game_action_handler(
         };
 
         if let Some(inst) = installer {
-            InstallerManager::spawn_install(settings_arc, inst, game_id.clone());
+            let game_id_clone = game_id.clone();
+            let mut settings_sig_mut = settings_sig;
+
+            spawn(async move {
+                match inst.install().await {
+                    Ok(installed_game) => {
+                        if let Ok(mut settings) = settings_arc.write() {
+                            settings.installed_games.insert(game_id_clone, installed_game);
+                            if let Err(e) = settings.save() {
+                                eprintln!("Failed to save settings: {}", e);
+                                return;
+                            }
+
+                            drop(settings);
+                            let new_settings = settings_arc.read().unwrap().clone();
+                            settings_sig_mut.set(Arc::new(RwLock::new(new_settings)));
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to install game: {}", e);
+                    }
+                }
+            });
         }
     })
 }
