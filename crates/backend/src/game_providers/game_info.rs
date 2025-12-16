@@ -1,5 +1,7 @@
 use reqwest::Url;
 
+use crate::game_providers::version::Version;
+
 #[derive(Debug)]
 pub struct GameInfo {
     pub id: String,
@@ -12,6 +14,8 @@ pub struct GameInfo {
 pub struct GameEdition {
     pub name: String,
     pub id: String,
+    pub description: String,
+    pub version_info: EditionVersionInfo,
 }
 
 #[derive(Debug)]
@@ -39,4 +43,11 @@ pub struct Video {
     pub fallback: Url,
     pub size: Option<(u32, u32)>,
     pub framerate: Option<f32>,
+}
+
+#[derive(Debug)]
+pub struct EditionVersionInfo {
+    pub latest: Version,
+    pub patches: Vec<Version>,
+    pub pre_download: Option<Version>,
 }

@@ -1,8 +1,57 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiResponse<DataType> {
+    pub retcode: i32,
+    pub message: String,
+    pub data: DataType,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct GetAllGameBasicInfo {
     pub game_info_list: Vec<GameBasicInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetGameConfigs {
+    pub launch_configs: Vec<LaunchConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetGameBranches {
+    pub game_branches: Vec<GameBranch>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetGamePackages {
+    pub game_packages: Vec<GamePackage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetGameScanInfo {
+    pub game_scan_info: Vec<GameScanInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetGames {
+    pub games: Vec<Game>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetGameContent {
+    pub content: Content,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetGameComboInfo {
+    pub launch_configs: LaunchConfig,
+    pub game_branches: GameBranch,
+    pub game_packages: GamePackage,
+
+    // Unknown, always empty
+    pub game_channel_sdks: Vec<serde_json::Value>,
+
+    pub deprecated_file_configs: Vec<DeprecatedFileConfig>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -49,33 +98,6 @@ pub struct IconAsset {
 pub struct VideoAsset {
     pub url: String,
     pub size: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApiResponse<DataType> {
-    pub retcode: i32,
-    pub message: String,
-    pub data: DataType,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GetGameConfigs {
-    pub launch_configs: Vec<LaunchConfig>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GetGameScanInfo {
-    pub game_scan_info: Vec<GameScanInfo>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GetGames {
-    pub games: Vec<Game>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GetGameContent {
-    pub content: Content,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -143,7 +165,8 @@ pub struct Game {
     pub id: String,
     pub biz: String,
     pub display: Display,
-    pub reservation: Option<serde_json::Value>, // null or future object
+    // TODO: Figure out what this is
+    pub reservation: Option<serde_json::Value>,
     pub display_status: String,
     #[serde(default)]
     pub game_server_configs: Vec<GameServerConfig>,
@@ -159,6 +182,7 @@ pub struct Display {
     pub background: ImageLink,
     pub logo: ImageLink,
     pub thumbnail: ImageLink,
+    // TODO: Figure out what this is
     pub korea_rating: Option<serde_json::Value>,
     pub shortcut: Image,
     pub wpf_icon: Option<Image>, // sometimes null
@@ -189,6 +213,7 @@ pub struct GameServerConfig {
     pub auto_scan_registry_key: String,
     pub package_detection_info: String,
     pub game_id: String,
+    // TODO: Figure out what this is
     pub reservation: Option<serde_json::Value>,
     pub display_status: String,
 }
@@ -237,4 +262,95 @@ pub struct SocialMedia {
     pub links: Vec<serde_json::Value>, // empty array in sample
     pub enable_red_dot: bool,
     pub red_dot_content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GameBranch {
+    pub game: GameIdentifier,
+    pub main: BranchInfo,
+    pub pre_download: Option<BranchInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BranchInfo {
+    pub package_id: String,
+    pub branch: String,
+    pub password: String,
+    pub tag: String,
+    pub diff_tags: Vec<String>,
+    pub categories: Vec<CategoryId>,
+    pub required_client_version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GamePackage {
+    pub game: GameIdentifier,
+    pub main: Package,
+    pub pre_download: PreDownloadPackage,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Package {
+    pub major: PackageInfo,
+    pub patches: Vec<PackageInfo>,
+    pub required_client_version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreDownloadPackage {
+    // Should always be null
+    pub major: Option<PackageInfo>,
+    // Empty patches means no pre-download
+    pub patches: Vec<PackageInfo>,
+    pub required_client_version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PackageInfo {
+    pub version: String,
+    pub game_pkgs: Vec<GamePkg>,
+    pub audio_pkgs: Vec<AudioPkg>,
+    pub res_list_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GamePkg {
+    pub url: String,
+    pub md5: String,
+    pub size: String,
+    pub decompressed_size: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioPkg {
+    pub language: String,
+    pub url: String,
+    pub md5: String,
+    pub size: String,
+    pub decompressed_size: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Patch {
+    pub version: String,
+    pub game_pkgs: Vec<GamePkg>,
+    pub audio_pkgs: Vec<AudioPkg>,
+    pub res_list_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CategoryId {
+    pub category_id: String,
+    pub matching_field: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeprecatedFileConfig {
+    pub game: GameIdentifier,
+    pub deprecated_files: Vec<FileName>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileName {
+    pub name: String,
 }

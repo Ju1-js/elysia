@@ -3,6 +3,7 @@ pub mod endfield;
 pub mod game_info;
 pub mod hoyoplay;
 pub mod installer;
+pub mod version;
 
 use anyhow::Result;
 use async_trait::async_trait;

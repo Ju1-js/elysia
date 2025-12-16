@@ -162,14 +162,30 @@ async fn run_init(settings: &GlobalSettings) -> Result<()> {
     for game in manager.games {
         println!("Game: {}", game.name);
         println!("\tId: {}", game.id);
-        println!(
-            "\tEditions: {}",
-            game.editions
-                .into_iter()
-                .map(|edition| format!("{} [{}]", edition.name, edition.id))
-                .collect::<Vec<String>>()
-                .join(", ")
-        );
+        for edition in game.editions {
+            println!("\t\tEdition: {}", edition.name);
+            println!("\t\t\tId: {}", edition.id);
+            println!("\t\t\tDescription: {}", edition.description);
+            println!("\t\t\tLatest version: {}", edition.version_info.latest);
+            println!(
+                "\t\t\tPatches from: {}",
+                edition
+                    .version_info
+                    .patches
+                    .iter()
+                    .map(|f| f.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            );
+            println!(
+                "\t\t\tPre-Download: {}",
+                edition
+                    .version_info
+                    .pre_download
+                    .map(|f| f.to_string())
+                    .unwrap_or_else(|| String::from("None"))
+            )
+        }
     }
 
     let duration = start.elapsed();
