@@ -10,10 +10,10 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 reqwest = { workspace = true }
 dioxus = { version = "0.6.3", default-features = false, features = ["macro", "hooks"] }
-freya = { git = "https://github.com/marc2332/freya.git", branch = "main" }
-freya-elements = { git = "https://github.com/marc2332/freya.git", branch = "main" }
-freya-hooks = { git = "https://github.com/marc2332/freya.git", branch = "main" }
-freya-router = { git = "https://github.com/marc2332/freya.git", branch = "main" }
+freya = { git = "https://github.com/marc2332/freya.git", rev = "be6cd8d99811ed2dc258d2a3907760f9a65ebaec" }
+freya-elements = { git = "https://github.com/marc2332/freya.git", rev = "be6cd8d99811ed2dc258d2a3907760f9a65ebaec" }
+freya-hooks = { git = "https://github.com/marc2332/freya.git", rev = "be6cd8d99811ed2dc258d2a3907760f9a65ebaec" }
+freya-router = { git = "https://github.com/marc2332/freya.git", rev = "be6cd8d99811ed2dc258d2a3907760f9a65ebaec" }
 libwebp = "0.1.2"
 skia-safe = "0.87.0"
 once_cell = "1.21.0"
