@@ -17,7 +17,7 @@ pub fn Home() -> Element {
                 width: "100%",
                 height: "100%",
                 layer: "-1",
-                background: "linear-gradient(135deg, rgb(20,20,30) 0%, rgb(10,10,15) 100%)",
+                background: "linear-gradient(135deg, rgb(30,30,40) 0%, rgb(15,15,20) 100%)",
             },
             rect {
                 direction: "vertical",
@@ -25,10 +25,10 @@ pub fn Home() -> Element {
                 main_align: "center",
                 spacing: "24",
                 padding: "40",
-                background: "rgb(25,25,35,0.6)",
+                background: "rgb(35,35,45,0.5)",
                 corner_radius: "20",
                 shadow: "0 8 32 0 rgb(0, 0, 0, 60)",
-                backdrop_blur: "24",
+                backdrop_blur: "16",
                 max_width: "600",
                 image {
                     width: "120",
@@ -45,7 +45,7 @@ pub fn Home() -> Element {
                 label {
                     font_family: "Noto Sans",
                     font_size: "16",
-                    color: "rgb(180,180,180)",
+                    color: "rgb(200,200,210)",
                     text_align: "center",
                     "Select a game from the sidebar to get started."
                 },

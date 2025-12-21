@@ -15,6 +15,7 @@ pub struct DownloadProgress {
 #[derive(Props, Clone)]
 pub struct DownloadControlProps {
     pub game_id: String,
+    pub game_name: String,
     pub progress_key: String,
     pub installed: bool,
     pub get_progress: Rc<dyn Fn(&str) -> Option<DownloadProgress>>,
@@ -22,11 +23,13 @@ pub struct DownloadControlProps {
     pub accent_color: String,
     #[props(default)]
     pub onpress: Option<EventHandler<PressEvent>>,
+    pub download_active: Signal<bool>,
 }
 
 impl PartialEq for DownloadControlProps {
     fn eq(&self, other: &Self) -> bool {
         self.game_id == other.game_id
+            && self.game_name == other.game_name
             && self.progress_key == other.progress_key
             && self.installed == other.installed
             && self.accent_color == other.accent_color
@@ -37,62 +40,85 @@ impl PartialEq for DownloadControlProps {
 #[component]
 pub fn DownloadControl(props: DownloadControlProps) -> Element {
     let DownloadControlProps {
-        game_id: _, 
+        game_id, 
+        game_name,
         progress_key,
         installed,
         get_progress,
         accent_color,
         onpress,
+        mut download_active,
     } = props;
 
     let ButtonTheme {
-        background: _,
-        hover_background: _,
-        disabled_background: _,
-        border_fill,
-        focus_border_fill: _,
-        padding: _,
-        margin: _,
-        corner_radius: _,
-        width: _,
-        height: _,
         font_theme,
-        shadow: _,
+        ..
     } = use_applied_theme!(&None, filled_button);
 
-    let mut progress_sig = use_signal(|| None::<DownloadProgress>);
-    let mut installed_sig = use_signal(|| installed);
+    let mut progress = use_signal(|| None::<DownloadProgress>);
+    let mut is_installed = use_signal(|| installed);
 
     use_effect(use_reactive!(|installed| {
-        installed_sig.set(installed);
+        is_installed.set(installed);
+    }));
+    
+    let key_check = progress_key.clone();
+    let get_progress_check = get_progress.clone();
+    
+    use_effect(use_reactive!(|game_id| {
+        let current = get_progress_check(&key_check);
+        if let Some(ref p) = current {
+            if p.is_busy {
+                download_active.set(true);
+            } else {
+                download_active.set(false);
+                progress.set(None);
+            }
+        } else {
+            download_active.set(false);
+            progress.set(None);
+        }
+        
+        let _ = game_id;
     }));
 
-    {
-        let key = progress_key.clone();
-        let get_progress = get_progress.clone();
-        use_future(move || {
-            let key = key.clone();
-            let get_progress = get_progress.clone();
-            async move {
+    let active = download_active();
+    use_effect(use_reactive!(|active| {
+        if active {
+            let key = progress_key.clone();
+            let getter = get_progress.clone();
+            
+            spawn(async move {
                 loop {
-                    let p = get_progress(&key);
+                    if !download_active() {
+                        break;
+                    }
+                    
+                    let current = getter(&key);
 
-                    if let Some(progress) = &p {
-                        if !progress.is_busy && progress.downloaded == progress.total && progress.total > 0 {
-                            installed_sig.set(true);
+                    if let Some(ref p) = current {
+                        if !p.is_busy && p.downloaded == p.total && p.total > 0 {
+                            is_installed.set(true);
+                            download_active.set(false);
+                            break;
+                        }
+                        
+                        if !p.is_busy {
+                            download_active.set(false);
+                            break;
                         }
                     }
                     
-                    progress_sig.set(p);
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    progress.set(current);
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 }
-            }
-        });
-    }
+            });
+        }
+    }));
 
-    let progress_opt = progress_sig.read().clone();
+    let current = progress.read().clone();
 
-    let progress_element: Element = if let Some(p) = &progress_opt {
+    let progress_widget: Element = if let Some(p) = &current {
         if !p.is_busy {
             rsx!({})
         } else {
@@ -124,15 +150,22 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
                 rect {
                     width: "100%",
                     padding: "16",
-                    corner_radius: "12",
-                    background: "#00000078",
-                    border: "1 inner {border_fill}",
+                    corner_radius: "8",
+                    background: "rgb(35, 35, 40)",
+                    background_opacity: "0.6",
+                    border: "1 solid rgb(255, 255, 255, 0.15)",
                     direction: "vertical",
                     spacing: "10",
-                    shadow: "0 2 12 0 rgb(0, 0, 0, 40)",
+                    shadow: "0 4 16 0 rgb(0, 0, 0, 80), 0 2 6 0 rgb(0, 0, 0, 50)",
                     backdrop_blur: "16",
                     
-                    // Progress bar
+                    label {
+                        color: "{font_theme.color}",
+                        font_size: "14",
+                        font_weight: "700",
+                        "{game_name}"
+                    }
+                    
                     rect {
                         width: "100%",
                         height: "6",
@@ -147,7 +180,6 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
                         }
                     }
                     
-                    // Status text with percentage
                     rect {
                         width: "100%",
                         direction: "horizontal",
@@ -172,13 +204,13 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
         rsx!({})
     };
 
-    let button_label = if *installed_sig.read() {
+    let button_label = if *is_installed.read() {
         "Start Game"
     } else {
         "Download Game"
     };
 
-    let is_busy = progress_opt
+    let is_busy = current
         .as_ref()
         .map(|p| p.is_busy)
         .unwrap_or(false);
@@ -188,7 +220,7 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
             width: "100%",
             direction: "vertical",
             spacing: "8",
-            { progress_element }
+            { progress_widget }
 
             {
                 if !is_busy {

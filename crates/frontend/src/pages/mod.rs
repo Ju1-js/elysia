@@ -2,11 +2,9 @@
 #![allow(unused_imports)]
 
 mod Error;
-mod Game;
+mod game;
 mod Home;
-mod GameSettings;
 
 pub use Error::*;
-pub use Game::*;
+pub use game::*;
 pub use Home::*;
-pub use GameSettings::*;

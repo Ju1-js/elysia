@@ -8,6 +8,7 @@ mod MyButton;
 mod MyNetworkImage;
 mod MyNewsWidget;
 mod MySidebarItem;
+mod Preload;
 mod VideoBackgroundPlayer;
 
 pub use DownloadControl::*;
@@ -17,5 +18,6 @@ pub use MyButton::*;
 pub use MyNetworkImage::*;
 pub use MyNewsWidget::*;
 pub use MySidebarItem::*;
+pub use Preload::*;
 pub use VideoBackgroundPlayer::*;
 

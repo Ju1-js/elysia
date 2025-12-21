@@ -11,6 +11,11 @@ use crate::{
     pages::{ErrorPage, Game, Home},
 };
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct GamePageState {
+    pub prev_game_id: Option<String>,
+}
+
 #[derive(Routable, Clone, PartialEq)]
 #[rustfmt::skip]
 pub enum Route {
@@ -37,8 +42,8 @@ fn FromRouteToCurrent(
 ) -> Element {
     let mut animated_router = use_animated_router::<Route>();
     let animations = use_animation_with_dependencies(&upwards, move |_conf, _upwards| {
-        AnimNum::new(1.0, 0.0)
-            .time(800)
+        AnimNum::new(1.0, 0.96)
+            .time(300)
             .ease(Ease::Out)
             .function(Function::Cubic)
     });
@@ -53,28 +58,29 @@ fn FromRouteToCurrent(
         }
     });
 
-    let opacity = animations.get().read().read();
+    let scale_from = animations.get().read().read();
+    let scale_to = 0.96 + (1.0 - scale_from);
     let to = rsx!(Outlet::<Route> {});
 
     rsx!(
         rect {
             height: "fill",
             width: "fill",
-            // Fade out
             rect {
                 height: "fill",
                 width: "fill",
                 position: "absolute",
                 position_top: "0",
                 position_left: "0",
-                opacity: "{opacity}",
+                rotate: "0deg",
+                scale: "{scale_from}",
                 Expand { {from} }
             }
-            // Fade in
             rect {
                 height: "fill",
                 width: "fill",
-                opacity: "{1.0 - opacity}",
+                rotate: "0deg",
+                scale: "{scale_to}",
                 Expand { {to} }
             }
         }
@@ -86,9 +92,10 @@ fn AnimatedOutlet(children: Element) -> Element {
     let (reference, node_size) = use_node_signal();
     let animated_router = use_context::<Signal<AnimatedRouterContext<Route>>>();
 
-    let from_route = match animated_router() {
-        AnimatedRouterContext::FromTo(Route::Home, Route::Game) => Some((rsx!(Home {}), true)),
-        AnimatedRouterContext::FromTo(Route::Game, Route::Home) => Some((rsx!(Game {}), false)),
+    let from_route = match *animated_router.peek() {
+        AnimatedRouterContext::FromTo(Route::Home, Route::Game) => {
+            Some((rsx!(Home { key: "home-transition" }), true))
+        },
         _ => None,
     };
 
@@ -121,6 +128,9 @@ fn make_links(
             rsx!(
                 rect {
                     key: game.id.clone(),
+                    width: "100%",
+                    main_align: "center",
+                    cross_align: "center",
                     onclick: move |_| {
                         selected_game_id_mut.write().replace(game_id.clone());
                         navigator.push(Route::Game);
@@ -130,18 +140,32 @@ fn make_links(
                         {
                             match game.display.icon.url.parse::<Url>() {
                                 Ok(url) => rsx!(
-                                    MyNetworkImage {
-                                        url: url,
-                                        aspect_ratio: "max",
-                                        cover: "center",
+                                    rect {
                                         width: "48",
                                         height: "48",
-                                        sampling: "trilinear"
+                                        corner_radius: "10",
+                                        overflow: "clip",
+                                        padding: "2",
+                                        MyNetworkImage {
+                                            url: url,
+                                            width: "100%",
+                                            height: "100%",
+                                            aspect_ratio: "max",
+                                            cover: "center",
+                                            sampling: "trilinear"
+                                        }
                                     }
                                 ),
                                 Err(_) => rsx!(
                                     rect {
+                                        width: "48",
+                                        height: "48",
+                                        corner_radius: "10",
+                                        padding: "2",
+                                        main_align: "center",
+                                        cross_align: "center",
                                         label {
+                                            font_size: "9",
                                             {game.display.name.clone()}
                                         }
                                     }
@@ -159,9 +183,16 @@ fn make_links(
 fn AppLayout() -> Element {
     let ctx_resource = &use_context::<Resource<Context>>();
     let selected_game_id = use_signal(|| None::<String>);
+    let game_page_state = use_signal(|| GamePageState { prev_game_id: None });
     let navigator = use_navigator();
 
     use_context_provider(|| selected_game_id);
+    use_context_provider(|| game_page_state);
+
+    let ctx_option = ctx_resource.read_unchecked().clone();
+    if let Some(ref ctx) = ctx_option {
+        use_context_provider(|| ctx.clone());
+    }
 
     rsx! {
         NativeRouter {
@@ -178,27 +209,21 @@ fn AppLayout() -> Element {
                         height: "100%",
                         width: "80",
                         overflow: "clip",
-                        background: "rgb(20,20,20,0.85)",
+                        background: "rgb(30,30,35,0.7)",
                         shadow: "4 0 12 0 rgb(0, 0, 0, 50)",
                         layer: "-10",
-                        backdrop_blur: "24",
+                        backdrop_blur: "16",
                         ScrollView {
-                            padding: "8",
-                            spacing: "8",
+                            padding: "16",
+                            spacing: "12",
                             height: "80%",
-                            match &*ctx_resource.read_unchecked() {
-                                Some(ctx) => {
-                                    use_context_provider(|| ctx.clone());
-                                    rsx! {
-                                        for link in make_links(&ctx.api_games, selected_game_id, navigator.clone()) {
-                                            {link}
-                                        }
-                                    }
-                                },
-                                _ => rsx! {
-                                    label {
-                                        "Loading..."
-                                    }
+                            if let Some(ctx) = &ctx_option {
+                                for link in make_links(&ctx.api_games, selected_game_id, navigator.clone()) {
+                                    {link}
+                                }
+                            } else {
+                                label {
+                                    "Loading..."
                                 }
                             }
                         }
@@ -232,7 +257,7 @@ fn AppLayout() -> Element {
 
                             rect {
                                 onclick: move |_| {
-                                    println!("Elysia logo clicked - add website URL here");
+                                    println!("Elysia logo clicked");
                                 },
                                 MySidebarItem {
                                     image {

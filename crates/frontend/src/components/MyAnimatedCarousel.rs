@@ -1,34 +1,31 @@
 use freya::{core::custom_attributes::NodeReferenceLayout, prelude::*};
 
-use crate::components::Expand;
-
 #[derive(Props, Clone, PartialEq)]
 pub struct MyAnimatedCarouselProps {
     pub items: Vec<Element>,
     #[props(optional)]
     pub selected: Option<Signal<usize>>,
+    #[props(optional)]
+    pub on_manual_change: Option<EventHandler<()>>,
 }
 
 #[component]
 pub fn MyAnimatedCarousel(props: MyAnimatedCarouselProps) -> Element {
-    let MyAnimatedCarouselProps { items, selected } = props;
+    let MyAnimatedCarouselProps { items, selected, on_manual_change } = props;
     let (reference, node_size) = use_node_signal();
     
-    // Initialize state from selected prop if provided
     let mut state = use_signal(|| {
         let initial_index = selected.as_ref().map(|s| s()).unwrap_or(0);
         CarouselState::Stopped(initial_index)
     });
 
-    // Sync internal state with external selected signal when it changes
     use_effect(move || {
         if let Some(sel) = selected {
             let external_index = sel();
             let current_state = *state.read();
-            // Only update if we're stopped and the indices don't match
             if let CarouselState::Stopped(internal_index) = current_state {
                 if internal_index != external_index {
-                    *state.write() = CarouselState::Stopped(external_index);
+                    *state.write() = CarouselState::Running(internal_index, external_index);
                 }
             }
         }
@@ -37,7 +34,6 @@ pub fn MyAnimatedCarousel(props: MyAnimatedCarouselProps) -> Element {
     let len = items.len();
     let onwheel = move |e: Event<WheelData>| {
         let direction = e.get_delta_y().signum();
-
         let current: CarouselState = *state.read();
 
         match current {
@@ -47,10 +43,16 @@ pub fn MyAnimatedCarousel(props: MyAnimatedCarouselProps) -> Element {
                     if let Some(mut sel) = selected {
                         *sel.write() = index + 1;
                     }
+                    if let Some(handler) = on_manual_change {
+                        handler.call(());
+                    }
                 } else if direction < 0.0 && index > 0 {
                     *state.write() = CarouselState::Running(index, index - 1);
                     if let Some(mut sel) = selected {
                         *sel.write() = index - 1;
+                    }
+                    if let Some(handler) = on_manual_change {
+                        handler.call(());
                     }
                 }
             }
@@ -141,20 +143,27 @@ fn Carousel(
                                     width: "100%",
                                     position: "relative",
                                     
-                                    // Fade in
                                     rect {
                                         width: "100%",
+                                        position: "absolute",
+                                        position_top: "0",
+                                        position_left: "0",
                                         opacity: "{1.0 - opacity}",
                                         {&items[to]}
                                     }
                                     
-                                    // Fade out
                                     rect {
                                         width: "100%",
                                         position: "absolute",
                                         position_top: "0",
                                         position_left: "0",
                                         opacity: "{opacity}",
+                                        {&items[from]}
+                                    }
+                                    
+                                    rect {
+                                        width: "100%",
+                                        opacity: "0",
                                         {&items[from]}
                                     }
                                 }

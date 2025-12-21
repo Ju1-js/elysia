@@ -1,8 +1,17 @@
+use anyhow::{Context, Result};
 use dioxus::prelude::*;
 use freya::prelude::*;
-use skia_safe::{images, ImageInfo, ColorType, AlphaType, Data, SamplingOptions, FilterMode, MipmapMode};
-use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
+use skia_safe::{
+    images, AlphaType, Canvas, ColorType, Data, FilterMode, ImageInfo, MipmapMode, SamplingOptions,
+};
+use std::path::PathBuf;
+use std::sync::{
+    atomic::{AtomicBool, AtomicU64, Ordering},
+    Arc, Mutex,
+};
+use std::time::{Duration, Instant};
+
+use backend::settings::GlobalSettings;
 use ffmpeg_next as ffmpeg;
 
 #[derive(Clone)]
@@ -10,263 +19,428 @@ struct VideoFrame {
     pixels: Arc<Vec<u8>>,
     width: u32,
     height: u32,
+    generation: u64,
+}
+
+struct VideoPlayerState {
+    shared_frame: Arc<Mutex<Option<VideoFrame>>>,
+    should_stop: Arc<AtomicBool>,
+    active_url: String,
+    generation: Arc<AtomicU64>,
+}
+
+fn generate_cache_filename(url: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    url.hash(&mut hasher);
+    format!("video_{:x}.webm", hasher.finish())
+}
+
+async fn get_cached_or_download_video(url: &str, cache_dir: &PathBuf) -> Result<PathBuf> {
+    let videos_cache_dir = cache_dir.join("videos");
+    tokio::fs::create_dir_all(&videos_cache_dir)
+        .await
+        .context("Failed to create videos cache directory")?;
+
+    let cache_path = videos_cache_dir.join(generate_cache_filename(url));
+
+    if cache_path.exists() {
+        return Ok(cache_path);
+    }
+
+    let temp_path = cache_path.with_extension("tmp");
+
+    let response = reqwest::get(url)
+        .await
+        .context("Failed to fetch video URL")?;
+    let bytes = response.bytes().await.context("Failed to read video bytes")?;
+
+    tokio::fs::write(&temp_path, &bytes)
+        .await
+        .context("Failed to write temporary video file")?;
+    tokio::fs::rename(&temp_path, &cache_path)
+        .await
+        .context("Failed to rename video file to cache")?;
+
+    Ok(cache_path)
+}
+
+fn extract_frame_pixels(frame: &ffmpeg::util::frame::Video, generation: u64) -> VideoFrame {
+    let width = frame.width();
+    let height = frame.height();
+    let stride = frame.stride(0) as usize;
+    let frame_data = frame.data(0);
+
+    let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+
+    for row in 0..height as usize {
+        let row_start = row * stride;
+        let row_end = row_start + (width as usize * 4);
+        pixels.extend_from_slice(&frame_data[row_start..row_end]);
+    }
+
+    VideoFrame {
+        pixels: Arc::new(pixels),
+        width,
+        height,
+        generation,
+    }
+}
+
+async fn decode_and_stream_video(
+    url: String,
+    shared_frame: Arc<Mutex<Option<VideoFrame>>>,
+    stop_signal: Arc<AtomicBool>,
+    generation: Arc<AtomicU64>,
+    task_generation: u64,
+    ready_callback: tokio::sync::oneshot::Sender<()>,
+    cache_dir: PathBuf,
+    frame_ready_tx: tokio::sync::mpsc::UnboundedSender<()>,
+) -> Result<()> {
+    if generation.load(Ordering::Acquire) != task_generation {
+        return Ok(());
+    }
+
+    let video_path = get_cached_or_download_video(&url, &cache_dir).await?;
+
+    if generation.load(Ordering::Acquire) != task_generation {
+        return Ok(());
+    }
+
+    let shared_frame_clone = shared_frame.clone();
+    let stop_signal_clone = stop_signal.clone();
+    let generation_clone = generation.clone();
+
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        let should_exit = || {
+            stop_signal_clone.load(Ordering::Relaxed)
+                || generation_clone.load(Ordering::Acquire) != task_generation
+        };
+
+        if should_exit() {
+            return Ok(());
+        }
+
+        ffmpeg::init().context("Failed to initialize FFmpeg")?;
+        ffmpeg::util::log::set_level(ffmpeg::util::log::Level::Quiet);
+
+        let mut input_context =
+            ffmpeg::format::input(&video_path).context("Failed to open video file")?;
+
+        if should_exit() {
+            return Ok(());
+        }
+
+        let video_stream = input_context
+            .streams()
+            .best(ffmpeg::media::Type::Video)
+            .context("No video stream found")?;
+
+        let stream_index = video_stream.index();
+        let stream_fps = video_stream.avg_frame_rate();
+        let codec_context =
+            ffmpeg::codec::context::Context::from_parameters(video_stream.parameters())
+                .context("Failed to create codec context")?;
+        let mut decoder = codec_context
+            .decoder()
+            .video()
+            .context("Failed to create video decoder")?;
+
+        let decoder_fps = decoder.frame_rate();
+
+        let frame_rate = if stream_fps.0 > 0 && stream_fps.1 > 0 {
+            stream_fps
+        } else if let Some(fps) = decoder_fps {
+            if fps.0 > 0 && fps.1 > 0 {
+                fps
+            } else {
+                (30, 1).into()
+            }
+        } else {
+            (30, 1).into()
+        };
+
+        let fps_value = frame_rate.0 as f64 / frame_rate.1 as f64;
+        let frame_duration = Duration::from_secs_f64(1.0 / fps_value);
+
+        if should_exit() {
+            return Ok(());
+        }
+
+        let mut scaler = ffmpeg::software::scaling::context::Context::get(
+            decoder.format(),
+            decoder.width(),
+            decoder.height(),
+            ffmpeg::format::Pixel::RGBA,
+            decoder.width(),
+            decoder.height(),
+            ffmpeg::software::scaling::Flags::LANCZOS,
+        )
+        .context("Failed to create scaler")?;
+
+        let mut decoded_frame = ffmpeg::util::frame::Video::empty();
+        let mut rgba_frame = ffmpeg::util::frame::Video::empty();
+
+        let mut first_frame_sent = false;
+        let mut last_frame_time = Instant::now();
+        let mut ready_callback = Some(ready_callback);
+
+        let result = (|| -> Result<()> {
+            loop {
+                if should_exit() {
+                    return Ok(());
+                }
+
+                let mut reached_end = true;
+
+                for (stream, packet) in input_context.packets() {
+                    if should_exit() {
+                        return Ok(());
+                    }
+
+                    if stream.index() == stream_index {
+                        reached_end = false;
+                        decoder
+                            .send_packet(&packet)
+                            .context("Failed to send packet to decoder")?;
+
+                        while decoder.receive_frame(&mut decoded_frame).is_ok() {
+                            if should_exit() {
+                                return Ok(());
+                            }
+
+                            scaler
+                                .run(&decoded_frame, &mut rgba_frame)
+                                .context("Failed to scale frame")?;
+
+                            let video_frame = extract_frame_pixels(&rgba_frame, task_generation);
+
+                            if generation_clone.load(Ordering::Acquire) == task_generation {
+                                if let Ok(mut frame_guard) = shared_frame_clone.lock() {
+                                    if generation_clone.load(Ordering::Acquire) == task_generation {
+                                        *frame_guard = Some(video_frame);
+                                        let _ = frame_ready_tx.send(());
+                                    }
+                                }
+                            } else {
+                                return Ok(());
+                            }
+
+                            if !first_frame_sent {
+                                if let Some(callback) = ready_callback.take() {
+                                    let _ = callback.send(());
+                                }
+                                first_frame_sent = true;
+                            }
+
+                            let elapsed = last_frame_time.elapsed();
+                            if elapsed < frame_duration {
+                                std::thread::sleep(frame_duration - elapsed);
+                            }
+                            last_frame_time = Instant::now();
+                        }
+                    }
+                }
+
+                if reached_end {
+                    if should_exit() {
+                        return Ok(());
+                    }
+                    input_context
+                        .seek(0, ..)
+                        .context("Failed to seek to beginning for loop")?;
+                }
+            }
+        })();
+
+        if let Ok(mut guard) = shared_frame_clone.lock() {
+            *guard = None;
+        }
+
+        result
+    })
+    .await
+    .context("Video decode task panicked")??;
+
+    Ok(())
 }
 
 #[component]
-pub fn VideoBackgroundPlayer(
-    video_url: String,
-    on_ready: EventHandler<()>,
-) -> Element {
+pub fn VideoBackgroundPlayer(video_url: String, on_ready: EventHandler<()>) -> Element {
+    let settings_signal = use_context::<Signal<Arc<std::sync::RwLock<GlobalSettings>>>>();
     let platform = use_platform();
-    let current_frame = use_signal(|| Arc::new(Mutex::new(None::<VideoFrame>)));
-    let mut should_stop = use_signal(|| Arc::new(AtomicBool::new(false)));
-    let mut current_url = use_signal(|| video_url.clone());
 
-    if *current_url.read() != video_url {
+    let mut player_state = use_signal(|| VideoPlayerState {
+        shared_frame: Arc::new(Mutex::new(None)),
+        should_stop: Arc::new(AtomicBool::new(false)),
+        active_url: video_url.clone(),
+        generation: Arc::new(AtomicU64::new(0)),
+    });
 
-        should_stop.read().store(true, Ordering::Relaxed);
-        
-        *current_frame.read().lock().unwrap() = None;
-        current_url.set(video_url.clone());
-        
-        should_stop.set(Arc::new(AtomicBool::new(false)));
+    if player_state.read().active_url != video_url {
+        let current_state = player_state.read();
+
+        let previous_generation = current_state.generation.fetch_add(1, Ordering::Release);
+        current_state.should_stop.store(true, Ordering::Relaxed);
+
+        if let Ok(mut guard) = current_state.shared_frame.lock() {
+            *guard = None;
+        }
+
+        drop(current_state);
+
+        let new_generation = previous_generation + 1;
+        player_state.set(VideoPlayerState {
+            shared_frame: Arc::new(Mutex::new(None)),
+            should_stop: Arc::new(AtomicBool::new(false)),
+            active_url: video_url.clone(),
+            generation: Arc::new(AtomicU64::new(new_generation)),
+        });
     }
-    
+
     use_effect(move || {
-        let url = current_url.read().clone();
-        let frame_store = current_frame.read().clone();
-        let stop_flag = should_stop.read().clone();
-        
-        stop_flag.store(false, Ordering::Relaxed);
-        
+        let state = player_state.read();
+        let url = state.active_url.clone();
+        let shared_frame = state.shared_frame.clone();
+        let stop_signal = state.should_stop.clone();
+        let generation = state.generation.clone();
+        let task_generation = generation.load(Ordering::Acquire);
+
+        let cache_dir = settings_signal
+            .read()
+            .read()
+            .ok()
+            .map(|s| s.cache_directory.clone())
+            .unwrap_or_else(|| PathBuf::from("/tmp"));
+
+        let (frame_ready_tx, mut frame_ready_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        spawn(async move {
+            while frame_ready_rx.recv().await.is_some() {
+                platform.request_animation_frame();
+            }
+        });
+
         spawn(async move {
             let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+            let generation_for_check = generation.clone();
 
-            spawn(async move {
-                if let Err(e) = stream_video_frames(url, frame_store, stop_flag, ready_tx).await {
-                    eprintln!("Video playback error: {}", e);
+            let _handle = spawn(async move {
+                if let Err(err) = decode_and_stream_video(
+                    url,
+                    shared_frame,
+                    stop_signal,
+                    generation.clone(),
+                    task_generation,
+                    ready_tx,
+                    cache_dir,
+                    frame_ready_tx,
+                )
+                .await
+                {
+                    if generation.load(Ordering::Acquire) == task_generation {
+                        eprintln!("Video playback error (gen {}): {}", task_generation, err);
+                    }
                 }
             });
 
             if ready_rx.await.is_ok() {
-                on_ready.call(());
+                if generation_for_check.load(Ordering::Acquire) == task_generation {
+                    on_ready.call(());
+                }
             }
         });
     });
+
+    let (canvas_ref, size) = use_node_signal();
 
     use_drop(move || {
-        should_stop.read().store(true, Ordering::Relaxed);
-    });
-    
-    let (reference, size) = use_node_signal();
-    
-    use_hook(|| {
-        let mut ticker = platform.new_ticker();
-        spawn(async move {
-            loop {
-                ticker.tick().await;
-                platform.invalidate_drawing_area(size.peek().area);
-                platform.request_animation_frame();
-            }
-        });
-    });
+        let state = player_state.read();
 
-    let canvas = use_canvas(move || {
-        let frame_store = current_frame.read().clone();
-        move |ctx| {
-            ctx.canvas.save();
-            
-            let frame_guard = frame_store.lock().unwrap();
-            
-            if let Some(frame) = frame_guard.as_ref() {
-                let info = ImageInfo::new(
-                    (frame.width as i32, frame.height as i32),
-                    ColorType::RGBA8888,
-                    AlphaType::Premul,
-                    None,
-                );
-                
-                let data = Data::new_copy(&frame.pixels);
-                
-                if let Some(image) = images::raster_from_data(
-                    &info,
-                    data,
-                    (frame.width * 4) as usize,
-                ) {
+        state.generation.fetch_add(1, Ordering::Release);
+        state.should_stop.store(true, Ordering::Relaxed);
 
-                    let dest_rect = skia_safe::Rect::from_xywh(
-                        ctx.area.min_x(),
-                        ctx.area.min_y(),
-                        ctx.area.width(),
-                        ctx.area.height(),
-                    );
-
-                    let sampling = SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear);
-                    
-                    let mut paint = skia_safe::Paint::default();
-                    paint.set_anti_alias(true);
-                    
-                    ctx.canvas.draw_image_rect_with_sampling_options(
-                        image,
-                        None,
-                        dest_rect,
-                        sampling,
-                        &paint,
-                    );
-                }
-            } else {
-                let mut paint = skia_safe::Paint::default();
-                paint.set_color(skia_safe::Color::from_rgb(20, 20, 20));
-                ctx.canvas.draw_rect(
-                    skia_safe::Rect::from_xywh(
-                        ctx.area.min_x(),
-                        ctx.area.min_y(),
-                        ctx.area.width(),
-                        ctx.area.height()
-                    ),
-                    &paint,
-                );
-            }
-            
-            ctx.canvas.restore();
+        if let Ok(mut guard) = state.shared_frame.lock() {
+            *guard = None;
         }
     });
-    
+
+    let canvas = use_canvas_with_deps((&player_state, &size), move |_| {
+        let shared_frame = player_state.read().shared_frame.clone();
+        let current_generation = player_state.read().generation.load(Ordering::Acquire);
+        let area = size.read().area;
+
+        move |canvas_context| {
+            canvas_context.canvas.save();
+
+            let frame_guard = shared_frame.lock().unwrap();
+
+            if let Some(frame) = frame_guard.as_ref() {
+                if frame.generation == current_generation {
+                    render_video_frame(&canvas_context.canvas, frame, &area);
+                } else {
+                    render_placeholder(&canvas_context.canvas, &area);
+                }
+            } else {
+                render_placeholder(&canvas_context.canvas, &area);
+            }
+
+            canvas_context.canvas.restore();
+        }
+    });
+
     rsx! {
         rect {
             canvas_reference: canvas.attribute(),
-            reference,
+            reference: canvas_ref,
             width: "100%",
             height: "100%",
         }
     }
 }
 
-async fn stream_video_frames(
-    url: String,
-    frame_store: Arc<Mutex<Option<VideoFrame>>>,
-    should_stop: Arc<AtomicBool>,
-    first_frame_ready: tokio::sync::oneshot::Sender<()>,
-) -> Result<(), String> {
+fn render_video_frame(canvas: &Canvas, frame: &VideoFrame, area: &freya::prelude::Area) {
+    let image_info = ImageInfo::new(
+        (frame.width as i32, frame.height as i32),
+        ColorType::RGBA8888,
+        AlphaType::Premul,
+        None,
+    );
 
-    let video_path = download_video(&url).await?;
+    let pixel_data = Data::new_copy(&frame.pixels);
 
-    tokio::task::spawn_blocking(move || -> Result<(), String> {
-        // Suppress FFmpeg logs
-        ffmpeg::init().map_err(|e| e.to_string())?;
-        ffmpeg::util::log::set_level(ffmpeg::util::log::Level::Quiet);
-        
-        let mut ictx = ffmpeg::format::input(&video_path).map_err(|e| e.to_string())?;
-
-        let video_stream = ictx.streams()
-            .best(ffmpeg::media::Type::Video)
-            .ok_or("No video stream found")?;
-        let video_stream_index = video_stream.index();
-
-        let context_decoder = ffmpeg::codec::context::Context::from_parameters(video_stream.parameters())
-            .map_err(|e| e.to_string())?;
-        let mut decoder = context_decoder.decoder().video().map_err(|e| e.to_string())?;
-
-        let target_width = decoder.width();
-        let target_height = decoder.height();
-        
-        let mut scaler = ffmpeg::software::scaling::context::Context::get(
-            decoder.format(),
-            decoder.width(),
-            decoder.height(),
-            ffmpeg::format::Pixel::RGBA,
-            target_width,
-            target_height,
-            ffmpeg::software::scaling::Flags::LANCZOS,
-        ).map_err(|e| e.to_string())?;
-        
-        let mut decoded_frame = ffmpeg::util::frame::Video::empty();
-        let mut rgb_frame = ffmpeg::util::frame::Video::empty();
-        
-        let frame_rate = decoder.frame_rate().unwrap_or((60, 1).into());
-        let frame_duration = std::time::Duration::from_secs_f64(
-            frame_rate.1 as f64 / frame_rate.0 as f64
+    if let Some(image) =
+        images::raster_from_data(&image_info, pixel_data, (frame.width * 4) as usize)
+    {
+        let destination_rect = skia_safe::Rect::from_xywh(
+            area.min_x(),
+            area.min_y(),
+            area.width(),
+            area.height(),
         );
-        
-        let mut first_frame_ready_tx = Some(first_frame_ready);
-        
-        'outer: loop {
-            if should_stop.load(Ordering::Relaxed) {
-                break;
-            }
-            
-            let mut packets_exhausted = true;
-            
-            for (stream, packet) in ictx.packets() {
-                if should_stop.load(Ordering::Relaxed) {
-                    break 'outer;
-                }
 
-                if stream.index() == video_stream_index {
-                    packets_exhausted = false;
-                    decoder.send_packet(&packet).map_err(|e| e.to_string())?;
-                    
-                    while decoder.receive_frame(&mut decoded_frame).is_ok() {
-                        if should_stop.load(Ordering::Relaxed) {
-                            break 'outer;
-                        }
+        let sampling_options = SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear);
 
-                        scaler.run(&decoded_frame, &mut rgb_frame).map_err(|e| e.to_string())?;
+        let mut paint = skia_safe::Paint::default();
+        paint.set_anti_alias(true);
 
-                        let width = rgb_frame.width();
-                        let height = rgb_frame.height();
-                        let stride = rgb_frame.stride(0);
-                        let data = rgb_frame.data(0);
-                        
-                        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
-                        for y in 0..height {
-                            let row_start = (y * stride as u32) as usize;
-                            let row_end = row_start + (width * 4) as usize;
-                            pixels.extend_from_slice(&data[row_start..row_end]);
-                        }
-
-                        *frame_store.lock().unwrap() = Some(VideoFrame {
-                            pixels: Arc::new(pixels),
-                            width,
-                            height,
-                        });
-
-                        if let Some(tx) = first_frame_ready_tx.take() {
-                            let _ = tx.send(());
-                        }
-
-                        std::thread::sleep(frame_duration);
-                    }
-                }
-            }
-
-            if packets_exhausted {
-                ictx.seek(0, ..).map_err(|e| e.to_string())?;
-            }
-        }
-
-        let _ = std::fs::remove_file(&video_path);
-        
-        Ok(())
-    })
-    .await
-    .map_err(|e| format!("Join error: {}", e))??;
-    
-    Ok(())
+        canvas.draw_image_rect_with_sampling_options(
+            image,
+            None,
+            destination_rect,
+            sampling_options,
+            &paint,
+        );
+    }
 }
 
-async fn download_video(url: &str) -> Result<std::path::PathBuf, String> {
-    let response = reqwest::get(url).await.map_err(|e| e.to_string())?;
-    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
-    
-    let path = std::path::PathBuf::from(format!(
-        "/tmp/video_{}.webm",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|e| e.to_string())?
-            .as_secs()
-    ));
-    
-    tokio::fs::write(&path, bytes).await.map_err(|e| e.to_string())?;
-    Ok(path)
+fn render_placeholder(canvas: &Canvas, area: &freya::prelude::Area) {
+    let mut paint = skia_safe::Paint::default();
+    paint.set_color(skia_safe::Color::from_rgb(20, 20, 20));
+
+    let rect = skia_safe::Rect::from_xywh(area.min_x(), area.min_y(), area.width(), area.height());
+
+    canvas.draw_rect(rect, &paint);
 }

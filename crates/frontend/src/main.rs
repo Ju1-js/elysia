@@ -17,7 +17,7 @@ use reqwest::Url;
 
 use crate::context::Context;
 use backend::{
-    game_providers::hoyoplay::{get_game_content, get_games},
+    game_providers::hoyoplay::{get_game_content, get_games, get_video_url},
     runners::{Runners, Wine},
     settings::{GlobalSettings, InstalledGame, RuntimeComponents},
 };
@@ -78,13 +78,10 @@ fn app() -> Element {
     {
         to_owned![settings];
         use_drop(move || {
-            if let Ok(settings) = settings().read() {
-                if let Err(err) = settings.save() {
+            if let Ok(settings_data) = settings().read() {
+                if let Err(err) = settings_data.save() {
                     eprintln!("Failed to save settings: {}", err);
                 }
-                println!("Settings saved successfully");
-            } else {
-                println!("Failed to save settings");
             }
         });
     }
@@ -95,24 +92,24 @@ fn app() -> Element {
 
     use_init_theme(|| DARK_THEME);
 
-    let ctx = use_resource(move || async move {
-        let settings = settings.read();
-        let settings = settings.read().unwrap().clone();
+    let context = use_resource(move || async move {
+        let settings_lock = settings.read();
+        let settings_data = settings_lock.read().unwrap().clone();
 
-        let mut api_games = get_games(&settings)
+        let mut api_games = get_games(&settings_data)
             .await
-            .map_err(|e| e.to_string())
-            .map(|v| v.games)
-            .unwrap_or_else(|e| {
-                println!("Failed to load games from api: {e}");
+            .map_err(|err| err.to_string())
+            .map(|response| response.games)
+            .unwrap_or_else(|err| {
+                eprintln!("Failed to load games from api: {err}");
                 Vec::new()
             });
 
         let endfield_games = backend::game_providers::endfield::get_games()
             .await
-            .map(|v| v.games)
-            .unwrap_or_else(|e| {
-                println!("Failed to load endfield games: {e}");
+            .map(|response| response.games)
+            .unwrap_or_else(|err| {
+                eprintln!("Failed to load endfield games: {err}");
                 Vec::new()
             });
 
@@ -121,30 +118,30 @@ fn app() -> Element {
         let mut api_news = HashMap::new();
 
         for game in &api_games {
-            let id = game.id.to_owned();
-            let biz = game.biz.to_owned();
+            let game_id = game.id.to_owned();
+            let game_biz = game.biz.to_owned();
 
-            let response = if biz == "endfield" {
-                backend::game_providers::endfield::get_game_content(&id).await
+            let response = if game_biz == "endfield" {
+                backend::game_providers::endfield::get_game_content(&game_id).await
             } else {
-                get_game_content(&settings, &id).await
+                get_game_content(&settings_data, &game_id).await
             };
 
             match response {
-                Ok(response) => {
-                    api_news.insert(id, response.content);
+                Ok(content_response) => {
+                    api_news.insert(game_id, content_response.content);
                 }
-                Err(e) => {
-                    println!("Failed to load game content: {e}");
+                Err(err) => {
+                    eprintln!("Failed to load game content: {err}");
                 }
             }
         }
 
-        let api_game_basic_info = backend::game_providers::hoyoplay::get_all_game_basic_info(&settings, None)
+        let api_game_basic_info = backend::game_providers::hoyoplay::get_all_game_basic_info(&settings_data, None)
             .await
             .map(|info| info.game_info_list)
-            .unwrap_or_else(|e| {
-                println!("Failed to load game basic info: {e}");
+            .unwrap_or_else(|err| {
+                eprintln!("Failed to load game basic info: {err}");
                 Vec::new()
             });
 
@@ -155,27 +152,56 @@ fn app() -> Element {
         }
     });
 
-    use_context_provider(move || ctx);
+    use_context_provider(move || context);
     
-    let settings_for_preload = settings.clone();
+    let preload_settings = settings.clone();
     let mut has_preloaded = use_signal(|| false);
     
     use_effect(move || {
         if !has_preloaded() {
-            if let Some(context) = ctx.read_unchecked().as_ref() {
-                let games = context.api_games.clone();
-                let settings = settings_for_preload.clone();
+            if let Some(context_data) = context.read_unchecked().as_ref() {
+                let games = context_data.api_games.clone();
+                let basic_info = context_data.api_game_basic_info.clone();
+                let settings_signal = preload_settings.clone();
                 
                 spawn(async move {
-                    let s = settings.read();
-                    if let Ok(settings_data) = s.read() {
+                    let settings_lock = settings_signal.read();
+                    if let Ok(settings_data) = settings_lock.read() {
                         let cache_path = settings_data.cache_directory.display().to_string();
                         
-                        let urls: Vec<Url> = games.iter()
-                            .filter_map(|g| g.display.background.url.parse().ok())
-                            .collect();
+                        let mut image_urls: Vec<Url> = Vec::new();
                         
-                        components::preload_images(urls, cache_path);
+                        for game in &games {
+                            if let Ok(url) = game.display.background.url.parse() {
+                                image_urls.push(url);
+                            }
+                        }
+                        
+                        for game in &games {
+                            if let Ok(url) = game.display.icon.url.parse() {
+                                image_urls.push(url);
+                            }
+                        }
+                        
+                        components::preload_images(
+                            image_urls,
+                            cache_path.clone(),
+                            |url| Box::pin(components::fetch_image(url))
+                        );
+                        
+                        let mut video_urls: Vec<Url> = Vec::new();
+                        
+                        for info in &basic_info {
+                            if let Some(video_url) = get_video_url(&info.backgrounds) {
+                                if let Ok(url) = video_url.parse() {
+                                    video_urls.push(url);
+                                }
+                            }
+                        }
+                        
+                        if !video_urls.is_empty() {
+                            components::preload_videos(video_urls, cache_path, 3);
+                        }
                     }
                 });
                 

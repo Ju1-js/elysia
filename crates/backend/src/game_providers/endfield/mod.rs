@@ -239,7 +239,7 @@ pub async fn get_games() -> Result<GetGames, String> {
 
     let display = Display {
         language: "en-us".to_string(),
-        name: "Endfield".to_string(),
+        name: "Arknights: Endfield".to_string(),
         icon: placeholder_icon.clone(),
         title: "Endfield".to_string(),
         subtitle: String::new(),

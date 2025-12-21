@@ -24,3 +24,4 @@ dashmap = "6.1.0"
 ffmpeg-next = "8.0.0"
 image = "0.25.9"
 uuid = "1.19.0"
+anyhow.workspace = true

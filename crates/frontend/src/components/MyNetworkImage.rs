@@ -1,5 +1,4 @@
 use std::sync::{Arc, RwLock};
-use dashmap::DashMap;
 use bytes::Bytes;
 use freya::prelude::*;
 use libwebp::WebPDecodeRGBA;
@@ -7,10 +6,7 @@ use reqwest::{Url, header::CONTENT_TYPE};
 use skia_safe::{AlphaType, ColorType, Data, EncodedImageFormat, ImageInfo};
 
 use backend::settings::GlobalSettings;
-
-// More efficient concurrent cache than RwLock<HashMap>
-static MEMORY_CACHE: once_cell::sync::Lazy<DashMap<String, Bytes>> =
-    once_cell::sync::Lazy::new(|| DashMap::new());
+use super::Preload::MEMORY_CACHE;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct MyNetworkImageProps {
@@ -46,12 +42,10 @@ pub fn MyNetworkImage(
     }: MyNetworkImageProps,
 ) -> Element {
     let focus = use_focus();
-    let ctx = use_context::<Signal<Arc<RwLock<GlobalSettings>>>>();
+    let settings_signal = use_context::<Signal<Arc<RwLock<GlobalSettings>>>>();
 
-    // Memoize cache_path - it never changes during component lifetime
-    // This avoids recomputing on every render
     let cache_path = use_memo(move || {
-        ctx.read()
+        settings_signal.read()
             .read()
             .ok()
             .map(|s| s.cache_directory.clone())
@@ -60,43 +54,36 @@ pub fn MyNetworkImage(
 
     let a11y_id = focus.attribute();
 
-    // use_resource automatically re-runs when url changes
     let image_resource = use_resource(move || {
         let url_value = url.read().clone();
         let cache_path_value = cache_path();
-        let key = url_value.to_string();
+        let cache_key = url_value.to_string();
         
         async move {
-            // Check memory cache first (fast path)
-            if let Some(cached_bytes) = MEMORY_CACHE.get(&key) {
-                return Ok(cached_bytes.value().clone());
+            if let Some(cached_bytes) = MEMORY_CACHE.get(&cache_key) {
+                return Ok::<Bytes, String>(cached_bytes.value().clone());
             }
 
-            // Try disk cache
-            let bytes = match cacache::read(&cache_path_value, &key).await {
-                Ok(asset) => {
-                    let bytes = Bytes::from(asset);
-                    // Populate memory cache from disk
-                    MEMORY_CACHE.insert(key, bytes.clone());
+            let bytes = match cacache::read(&cache_path_value, &cache_key).await {
+                Ok(disk_cache_bytes) => {
+                    let bytes = Bytes::from(disk_cache_bytes);
+                    MEMORY_CACHE.insert(cache_key, bytes.clone());
                     bytes
                 }
                 Err(_) => {
-                    // Fetch from network
-                    let asset_bytes = fetch_image(url_value).await?;
+                    let fetched_bytes = fetch_image(url_value).await?;
                     
-                    // Write to disk cache asynchronously (don't block UI)
                     let cache_path_clone = cache_path_value.clone();
-                    let key_clone = key.clone();
-                    let bytes_clone = asset_bytes.clone();
+                    let key_clone = cache_key.clone();
+                    let bytes_clone = fetched_bytes.clone();
                     tokio::spawn(async move {
-                        if let Err(e) = cacache::write(&cache_path_clone, &key_clone, &bytes_clone).await {
-                            eprintln!("Failed to write to disk cache for {}: {}", key_clone, e);
+                        if let Err(err) = cacache::write(&cache_path_clone, &key_clone, &bytes_clone).await {
+                            eprintln!("Failed to write to disk cache for {}: {}", key_clone, err);
                         }
                     });
                     
-                    // Populate memory cache
-                    MEMORY_CACHE.insert(key, asset_bytes.clone());
-                    asset_bytes
+                    MEMORY_CACHE.insert(cache_key, fetched_bytes.clone());
+                    fetched_bytes
                 }
             };
 
@@ -104,7 +91,6 @@ pub fn MyNetworkImage(
         }
     });
     
-    // Derive url_string inline - it's cheap and depends on url signal
     let url_string = url.read().to_string();
 
     match &*image_resource.read_unchecked() {
@@ -167,44 +153,35 @@ pub fn MyNetworkImage(
     }
 }
 
-async fn fetch_image(url: Url) -> Result<Bytes, String> {
-    let res = reqwest::get(url)
+pub async fn fetch_image(url: Url) -> Result<Bytes, String> {
+    let response = reqwest::get(url)
         .await
-        .map_err(|e| format!("Failed to fetch image: {e}"))?;
+        .map_err(|err| format!("Failed to fetch image: {err}"))?;
 
-    let content_type = res
+    let content_type = response
         .headers()
         .get(CONTENT_TYPE)
         .and_then(|ct| ct.to_str().ok())
         .unwrap_or("")
         .to_lowercase();
 
-    let bytes = res
+    let bytes = response
         .bytes()
         .await
-        .map_err(|e| format!("Failed to read image bytes: {e}"))?;
+        .map_err(|err| format!("Failed to read image bytes: {err}"))?;
 
-    // WebP transcoding: Freya's image element may not natively support WebP format,
-    // so we convert it to PNG. This adds processing time but ensures compatibility.
-    // 
-    // Performance consideration: If Freya adds native WebP support in the future,
-    // this conversion can be removed for a significant speed boost.
-    // 
-    // Alternative: You could try removing this conversion and testing if Freya
-    // handles WebP natively - if it works, you'll get faster loading!
     if content_type.contains("webp") {
         transcode_webp_to_png(&bytes)
     } else {
-        // Pass through PNG, JPEG, and other formats directly - fastest path
         Ok(bytes)
     }
 }
 
 fn transcode_webp_to_png(bytes: &[u8]) -> Result<Bytes, String> {
-    let (width, height, buf) = WebPDecodeRGBA(bytes)
-        .map_err(|e| format!("Failed to decode WebP image: {e}"))?;
+    let (width, height, rgba_pixels) = WebPDecodeRGBA(bytes)
+        .map_err(|err| format!("Failed to decode WebP image: {err}"))?;
 
-    let info = ImageInfo::new(
+    let image_info = ImageInfo::new(
         (width as i32, height as i32),
         ColorType::RGBA8888,
         AlphaType::Unpremul,
@@ -215,8 +192,8 @@ fn transcode_webp_to_png(bytes: &[u8]) -> Result<Bytes, String> {
         .checked_mul(4)
         .ok_or_else(|| "Image dimensions too large".to_string())?;
     
-    let data = Data::new_copy(&buf);
-    let image = skia_safe::images::raster_from_data(&info, data, row_bytes)
+    let pixel_data = Data::new_copy(&rgba_pixels);
+    let image = skia_safe::images::raster_from_data(&image_info, pixel_data, row_bytes)
         .ok_or_else(|| "Failed to create Skia image from raw data".to_string())?;
 
     let encoded_data = image
@@ -224,31 +201,4 @@ fn transcode_webp_to_png(bytes: &[u8]) -> Result<Bytes, String> {
         .ok_or_else(|| "Failed to encode image to PNG".to_string())?;
 
     Ok(encoded_data.as_bytes().to_vec().into())
-}
-
-// Preload images in the background for better UX
-pub fn preload_images(urls: Vec<Url>, cache_path: String) {
-    tokio::spawn(async move {
-        for url in urls {
-            let key = url.to_string();
-            
-            // Skip if already in memory cache
-            if MEMORY_CACHE.contains_key(&key) {
-                continue;
-            }
-            
-            // Try disk cache first
-            if let Ok(asset) = cacache::read(&cache_path, &key).await {
-                let bytes = Bytes::from(asset);
-                MEMORY_CACHE.insert(key, bytes);
-                continue;
-            }
-            
-            // Fetch from network in background
-            if let Ok(bytes) = fetch_image(url).await {
-                MEMORY_CACHE.insert(key.clone(), bytes.clone());
-                let _ = cacache::write(&cache_path, &key, &bytes).await;
-            }
-        }
-    });
 }
