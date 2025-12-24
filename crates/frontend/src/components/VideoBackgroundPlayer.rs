@@ -55,11 +55,26 @@ async fn get_cached_or_download_video(url: &str, cache_dir: &PathBuf) -> Result<
     let response = reqwest::get(url)
         .await
         .context("Failed to fetch video URL")?;
-    let bytes = response.bytes().await.context("Failed to read video bytes")?;
 
-    tokio::fs::write(&temp_path, &bytes)
+    let mut file = tokio::fs::File::create(&temp_path)
         .await
-        .context("Failed to write temporary video file")?;
+        .context("Failed to create temp file")?;
+    
+    let mut stream = response.bytes_stream();
+    
+    use tokio_stream::StreamExt;
+    use tokio::io::AsyncWriteExt;
+    
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.context("Failed to read chunk")?;
+        file.write_all(&chunk)
+            .await
+            .context("Failed to write chunk")?;
+    }
+    
+    file.flush().await.context("Failed to flush file")?;
+    drop(file);
+
     tokio::fs::rename(&temp_path, &cache_path)
         .await
         .context("Failed to rename video file to cache")?;
@@ -147,6 +162,10 @@ async fn decode_and_stream_video(
             .decoder()
             .video()
             .context("Failed to create video decoder")?;
+
+        if should_exit() {
+            return Ok(());
+        }
 
         let decoder_fps = decoder.frame_rate();
 
@@ -255,6 +274,7 @@ async fn decode_and_stream_video(
             }
         })();
 
+        // Cleanup happens automatically when variables go out of scope
         if let Ok(mut guard) = shared_frame_clone.lock() {
             *guard = None;
         }
@@ -327,7 +347,7 @@ pub fn VideoBackgroundPlayer(video_url: String, on_ready: EventHandler<()>) -> E
             let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
             let generation_for_check = generation.clone();
 
-            let _handle = spawn(async move {
+            spawn(async move {
                 if let Err(err) = decode_and_stream_video(
                     url,
                     shared_frame,
