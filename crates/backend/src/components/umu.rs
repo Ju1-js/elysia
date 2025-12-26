@@ -1,69 +1,43 @@
-use std::fs;
-use std::path::{Path, PathBuf};
+use anyhow::Result;
+use async_trait::async_trait;
+use reqwest::Url;
 
-use common::utils::filesystem::ensure_dir;
-use crate::settings::GlobalSettings;
+use crate::components::{Component, ComponentVersion};
 
-const UMU_VERSION: &str = "1.2.9";
+pub struct Umu {}
 
-pub async fn setup_umu(settings: &GlobalSettings) -> Result<PathBuf, String> {
-    let umu_dir = settings.components_directory.join("umu");
-    let umu_run = umu_dir.join("umu-run");
-
-    if umu_run.exists() {
-        println!("umu-launcher found, skipping..");
-        return Ok(umu_run);
+#[async_trait]
+impl Component for Umu {
+    fn name(&self) -> &'static str {
+        "umu"
     }
 
-    println!("umu-launcher not found, downloading..");
-    ensure_dir(&settings.temp_directory)?;
-
-    let archive_path = download_umu(&settings.temp_directory).await?;
-    extract_umu(&archive_path, &settings.components_directory)?;
-    let _ = fs::remove_file(&archive_path);
-
-    if !umu_run.exists() {
-        return Err(format!("umu-run not found at {umu_run:?} after extraction"));
+    fn display_name(&self) -> &'static str {
+        "UMU Launcher"
     }
 
-    println!("umu-launcher download complete.");
+    async fn fetch_versions(&self) -> Result<Vec<ComponentVersion>> {
+        let repo = "Open-Wine-Components/umu-launcher";
+        let releases = common::git::github_releases(repo).await?;
 
-    Ok(umu_run)
-}
+        let versions = releases.into_iter().filter_map(|rel| {
+            let version = &rel.tag_name;
+            
+            rel.assets
+                .iter()
+                .filter_map(|asset| {
+                    if asset.name == format!("umu-launcher-{}-zipapp.tar", version) {
+                        Some(ComponentVersion {
+                            version: rel.tag_name.clone(),
+                            download_url: Url::parse(&asset.browser_download_url).ok()?,
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .next()
+        });
 
-async fn download_umu(temp_dir: &Path) -> Result<PathBuf, String> {
-    let url = format!(
-        "https://github.com/Open-Wine-Components/umu-launcher/releases/download/{0}/umu-launcher-{0}-zipapp.tar",
-        UMU_VERSION
-    );
-
-    let archive_path = temp_dir.join(format!("umu-launcher-{}-zipapp.tar", UMU_VERSION));
-
-    let resp = reqwest::get(&url)
-        .await
-        .map_err(|e| format!("Failed to download umu-launcher: {e}"))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("Download failed with status: {}", resp.status()));
+        Ok(versions.collect())
     }
-
-    let bytes = resp.bytes()
-        .await
-        .map_err(|e| format!("Failed to read umu-launcher bytes: {e}"))?;
-
-    fs::write(&archive_path, &bytes)
-        .map_err(|e| format!("Failed to write archive to {archive_path:?}: {e}"))?;
-
-    Ok(archive_path)
-}
-
-fn extract_umu(archive_path: &Path, dest_dir: &Path) -> Result<(), String> {
-    let file = fs::File::open(archive_path)
-        .map_err(|e| format!("Failed to open archive {archive_path:?}: {e}"))?;
-
-    let mut archive = tar::Archive::new(file);
-    archive.unpack(dest_dir)
-        .map_err(|e| format!("Failed to extract archive to {dest_dir:?}: {e}"))?;
-
-    Ok(())
 }

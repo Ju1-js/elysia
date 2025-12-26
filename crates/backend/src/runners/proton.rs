@@ -23,7 +23,7 @@ impl Runner for Proton {
         let game_executable = game.install_path.join(&game.executable_path);
         let manifest = TweakManifest::new();
 
-        let needs_jade = manifest.needs_jade(&game.id);
+        let needs_jadeite = manifest.needs_jadeite(&game.id);
         
         let mut cmd = Command::new(&umu_run);
         cmd.env("PROTONPATH", &proton_path)
@@ -31,7 +31,7 @@ impl Runner for Proton {
            .env("PROTONFIXES_DISABLE", "1")
            .env("WINEDEBUG", "");
         
-        if needs_jade {
+        if needs_jadeite {
             let jade = settings.components_directory
                 .join("tweaks")
                 .join("jadeite")

@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-
 use anyhow::Result;
 use async_trait::async_trait;
 use enum_table::{EnumTable, Enumable};
@@ -8,15 +7,17 @@ use serde::{Deserialize, Serialize};
 
 mod dxvk;
 mod jadeite;
+mod umu;
 pub mod tweaks;
 
-use crate::components::{dxvk::Dxvk, jadeite::Jadeite};
+use crate::components::{dxvk::Dxvk, jadeite::Jadeite, umu::Umu};
 
 #[derive(Serialize, PartialEq, Eq, Hash, Deserialize, Debug, Clone, Enumable, Copy)]
 #[repr(u8)]
 pub enum ComponentType {
     Dxvk,
     Jadeite,
+    Umu,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -29,7 +30,6 @@ pub struct ComponentVersion {
 pub trait Component: Send + Sync {
     fn name(&self) -> &'static str;
     fn display_name(&self) -> &'static str;
-
     async fn fetch_versions(&self) -> Result<Vec<ComponentVersion>>;
 }
 
@@ -45,13 +45,12 @@ pub struct ComponentManager {
 
 impl ComponentManager {
     pub async fn new() -> Self {
-        // TODO: save/load cache from file
-
         let components =
             EnumTable::<ComponentType, &'static dyn Component, { ComponentType::COUNT }>::new_with_fn(
                 |t| match t {
                     ComponentType::Dxvk => &(Dxvk {}),
                     ComponentType::Jadeite => &(Jadeite {}),
+                    ComponentType::Umu => &(Umu {}),
                 },
             );
 
@@ -76,7 +75,6 @@ impl ComponentManager {
             match handle.await {
                 Ok(handle) => {
                     let (name, versions) = handle;
-
                     if let Ok(versions) = versions {
                         self.cache.entries.insert(name, versions);
                     } else if let Err(err) = versions {
