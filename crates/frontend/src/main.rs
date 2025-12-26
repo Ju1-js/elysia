@@ -53,7 +53,7 @@ fn app() -> Element {
         }))
     });
 
-    {
+    use_hook(|| {
         let settings = settings.write();
         if let Ok(mut _settings) = settings.clone().write() {
             _settings.installed_games.insert(
@@ -73,7 +73,7 @@ fn app() -> Element {
                 },
             );
         }
-    }
+    });
 
     {
         to_owned![settings];

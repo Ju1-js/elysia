@@ -405,7 +405,11 @@ fn render_video_frame(canvas: &Canvas, frame: &VideoFrame, width: f32, height: f
         None,
     );
 
-    let pixel_data = Data::new_copy(&frame.pixels);
+    // CRITICAL FIX: Use new_bytes instead of new_copy to avoid duplicating 10MB per frame!
+    let pixels_arc = frame.pixels.clone();
+    let pixel_data = unsafe {
+        Data::new_bytes(&pixels_arc)
+    };
 
     if let Some(image) =
         images::raster_from_data(&image_info, pixel_data, (frame.width * 4) as usize)

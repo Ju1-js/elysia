@@ -78,10 +78,6 @@ impl VideoState {
         }
     }
 
-    pub fn clear_slot(&mut self, slot: VideoSlot) {
-        self.get_slot_mut(slot).clear();
-    }
-
     fn active(&self) -> &SlotData {
         self.get_slot(*self.active_slot.read())
     }

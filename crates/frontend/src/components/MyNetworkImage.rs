@@ -70,9 +70,7 @@ pub fn MyNetworkImage(
                     let key_clone = cache_key.clone();
                     let bytes_clone = fetched_bytes.clone();
                     tokio::spawn(async move {
-                        if let Err(err) = cacache::write(&cache_path_clone, &key_clone, &bytes_clone).await {
-                            eprintln!("Failed to write to disk cache for {}: {}", key_clone, err);
-                        }
+                        let _ = cacache::write(&cache_path_clone, &key_clone, &bytes_clone).await;
                     });
                     
                     fetched_bytes

@@ -87,10 +87,6 @@ pub fn BackgroundLayers(
         
         match trans_type {
             TransitionType::ImageToVideo | TransitionType::VideoToVideo => {
-                if matches!(trans_type, TransitionType::VideoToVideo) {
-                    let inactive = vs.active_slot.read().other();
-                    vs.clear_slot(inactive);
-                }
                 vs.load_next_video(video_url.clone());
             }
             TransitionType::VideoToImage => {
