@@ -40,9 +40,10 @@ pub fn BackgroundLayers(
     prev_theme_url: Option<String>,
     theme_fade_progress: f64,
     static_bg_url: Url,
-    mut video_state: VideoState,
     on_video_ready: EventHandler<()>,
 ) -> Element {
+    let mut video_state = use_context::<Signal<VideoState>>();
+    
     let fade = use_animation(move |_| {
         AnimNum::new(0.0, 1.0)
             .time(800)
@@ -67,14 +68,16 @@ pub fn BackgroundLayers(
         let now = Instant::now();
         let elapsed = now.duration_since(*last_change.read());
         
-        if elapsed < cooldown && video_state.is_transitioning() {
+        let mut vs = video_state.write();
+        
+        if elapsed < cooldown && vs.is_transitioning() {
             pending_url.set(Some(video_url.clone()));
             return;
         }
         
         last_change.set(now);
         
-        if video_state.is_transitioning() {
+        if vs.is_transitioning() {
             pending_url.set(Some(video_url.clone()));
             return;
         }
@@ -85,20 +88,20 @@ pub fn BackgroundLayers(
         match trans_type {
             TransitionType::ImageToVideo | TransitionType::VideoToVideo => {
                 if matches!(trans_type, TransitionType::VideoToVideo) {
-                    let inactive = video_state.active_slot.read().other();
-                    video_state.clear_slot(inactive);
+                    let inactive = vs.active_slot.read().other();
+                    vs.clear_slot(inactive);
                 }
-                video_state.load_next_video(video_url.clone());
+                vs.load_next_video(video_url.clone());
             }
             TransitionType::VideoToImage => {
                 if !fade.is_running() {
-                    video_state.start_transition();
+                    vs.start_transition();
                     fade.start();
                 }
             }
             TransitionType::ImageToImage => {
                 if video_url.is_some() {
-                    video_state.load_next_video(video_url.clone());
+                    vs.load_next_video(video_url.clone());
                 }
             }
         }
@@ -106,23 +109,28 @@ pub fn BackgroundLayers(
         prev_url.set(video_url.clone());
     }));
 
-    let inactive_ready = video_state.inactive_ready();
-    let is_transitioning = video_state.is_transitioning();
+    let vs = video_state.read();
+    let inactive_ready = vs.inactive_ready();
+    let is_transitioning = vs.is_transitioning();
+    drop(vs);
+    
     let trans_type = *transition.read();
     let is_animating = fade.is_running();
     
     use_effect(use_reactive!(|inactive_ready, is_transitioning, trans_type, is_animating| {
         if inactive_ready && !is_transitioning {
+            let mut vs = video_state.write();
+            
             match trans_type {
                 TransitionType::ImageToVideo | TransitionType::VideoToVideo => {
                     if !is_animating {
-                        video_state.start_transition();
+                        vs.start_transition();
                         fade.start();
                     }
                 }
                 TransitionType::ImageToImage => {
-                    let has_primary = video_state.primary_url().read().is_some();
-                    let has_secondary = video_state.secondary_url().read().is_some();
+                    let has_primary = vs.primary_url().read().is_some();
+                    let has_secondary = vs.secondary_url().read().is_some();
                     
                     if has_primary || has_secondary {
                         if is_animating {
@@ -130,7 +138,7 @@ pub fn BackgroundLayers(
                         }
                         
                         transition.set(TransitionType::ImageToVideo);
-                        video_state.start_transition();
+                        vs.start_transition();
                         fade.start();
                     }
                 }
@@ -148,62 +156,71 @@ pub fn BackgroundLayers(
 
     use_effect(use_reactive!(|is_running, progress| {
         if is_running {
-            video_state.update_crossfade(progress);
+            video_state.write().update_crossfade(progress);
         }
     }));
 
     use_effect(use_reactive!(|is_running| {
-        if !is_running && video_state.is_transitioning() {
-            let trans_type = *transition.read();
+        if !is_running {
+            let mut vs = video_state.write();
             
-            match trans_type {
-                TransitionType::ImageToVideo | TransitionType::VideoToVideo => {
-                    video_state.swap_and_clear();
-                    video_state.finish_transition();
-                }
-                TransitionType::VideoToImage => {
-                    video_state.reset();
-                }
-                _ => {}
-            }
-
-            let pending = pending_url.read().clone();
-            if let Some(pending_url_val) = pending {
-                let now = Instant::now();
-                let elapsed = now.duration_since(*last_change.read());
+            if vs.is_transitioning() {
+                let trans_type = *transition.read();
                 
-                if elapsed >= cooldown {
-                    pending_url.set(None);
+                match trans_type {
+                    TransitionType::ImageToVideo | TransitionType::VideoToVideo => {
+                        vs.swap_and_clear();
+                        vs.finish_transition();
+                    }
+                    TransitionType::VideoToImage => {
+                        vs.reset();
+                    }
+                    _ => {}
+                }
+                
+                drop(vs);
+
+                let pending = pending_url.read().clone();
+                if let Some(pending_url_val) = pending {
+                    let now = Instant::now();
+                    let elapsed = now.duration_since(*last_change.read());
                     
-                    let prev = prev_url.read().clone();
-                    let trans_type = TransitionType::from_urls(prev.as_ref(), pending_url_val.as_ref());
-                    transition.set(trans_type);
-                    
-                    match trans_type {
-                        TransitionType::ImageToVideo | TransitionType::VideoToVideo => {
-                            video_state.load_next_video(pending_url_val.clone());
-                        }
-                        TransitionType::VideoToImage => {
-                            video_state.start_transition();
-                            fade.start();
-                        }
-                        TransitionType::ImageToImage => {
-                            if pending_url_val.is_some() {
-                                video_state.load_next_video(pending_url_val.clone());
+                    if elapsed >= cooldown {
+                        pending_url.set(None);
+                        
+                        let prev = prev_url.read().clone();
+                        let trans_type = TransitionType::from_urls(prev.as_ref(), pending_url_val.as_ref());
+                        transition.set(trans_type);
+                        
+                        let mut vs = video_state.write();
+                        
+                        match trans_type {
+                            TransitionType::ImageToVideo | TransitionType::VideoToVideo => {
+                                vs.load_next_video(pending_url_val.clone());
+                            }
+                            TransitionType::VideoToImage => {
+                                vs.start_transition();
+                                fade.start();
+                            }
+                            TransitionType::ImageToImage => {
+                                if pending_url_val.is_some() {
+                                    vs.load_next_video(pending_url_val.clone());
+                                }
                             }
                         }
+                        
+                        prev_url.set(pending_url_val);
+                        last_change.set(now);
                     }
-                    
-                    prev_url.set(pending_url_val);
-                    last_change.set(now);
                 }
             }
         }
     }));
 
+    let vs = video_state.read();
     let trans_type = *transition.read();
-    let active_slot = *video_state.active_slot.read();
-    let has_active_video = video_state.active_url().is_some() && video_state.active_ready();
+    let active_slot = *vs.active_slot.read();
+    let has_active_video = vs.active_url().is_some() && vs.active_ready();
 
     let (primary_opacity, secondary_opacity, video_layer_opacity) = if is_running {
         let layer_opacity = match trans_type {
@@ -214,8 +231,8 @@ pub fn BackgroundLayers(
         };
         
         (
-            *video_state.primary_opacity().read(),
-            *video_state.secondary_opacity().read(),
+            *vs.primary_opacity().read(),
+            *vs.secondary_opacity().read(),
             layer_opacity,
         )
     } else {
@@ -229,8 +246,9 @@ pub fn BackgroundLayers(
         (primary_op, secondary_op, opacity)
     };
     
-    let primary_url = video_state.primary_url().read().clone();
-    let secondary_url = video_state.secondary_url().read().clone();
+    let primary_url = vs.primary_url().read().clone();
+    let secondary_url = vs.secondary_url().read().clone();
+    drop(vs);
     
     rsx! {
         rect {
@@ -316,7 +334,8 @@ pub fn BackgroundLayers(
                     key: "{video_primary}",
                     video_url: video_primary,
                     on_ready: move |_| {
-                        video_state.mark_ready(VideoSlot::Primary);
+                        let mut vs = video_state.write();
+                        vs.mark_ready(VideoSlot::Primary);
                         if active_slot == VideoSlot::Primary {
                             on_video_ready.call(());
                         }
@@ -341,7 +360,8 @@ pub fn BackgroundLayers(
                     key: "{video_secondary}",
                     video_url: video_secondary,
                     on_ready: move |_| {
-                        video_state.mark_ready(VideoSlot::Secondary);
+                        let mut vs = video_state.write();
+                        vs.mark_ready(VideoSlot::Secondary);
                         if active_slot == VideoSlot::Secondary {
                             on_video_ready.call(());
                         }

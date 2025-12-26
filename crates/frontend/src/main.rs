@@ -156,12 +156,13 @@ fn app() -> Element {
     
     let preload_settings = settings.clone();
     let mut has_preloaded = use_signal(|| false);
-    
+
     use_effect(move || {
         if !has_preloaded() {
             if let Some(context_data) = context.read_unchecked().as_ref() {
                 let games = context_data.api_games.clone();
                 let basic_info = context_data.api_game_basic_info.clone();
+                let api_news = context_data.api_news.clone();
                 let settings_signal = preload_settings.clone();
                 
                 spawn(async move {
@@ -183,10 +184,17 @@ fn app() -> Element {
                             }
                         }
                         
+                        for content in api_news.values() {
+                            for banner in &content.banners {
+                                if let Ok(url) = banner.image.url.parse() {
+                                    image_urls.push(url);
+                                }
+                            }
+                        }
+                        
                         components::preload_images(
                             image_urls,
                             cache_path.clone(),
-                            |url| Box::pin(components::fetch_image(url))
                         );
                         
                         let mut video_urls: Vec<Url> = Vec::new();
@@ -200,7 +208,7 @@ fn app() -> Element {
                         }
                         
                         if !video_urls.is_empty() {
-                            components::preload_videos(video_urls, cache_path, 3);
+                            components::preload_videos(video_urls, settings_data.cache_directory.clone(), 3);
                         }
                     }
                 });

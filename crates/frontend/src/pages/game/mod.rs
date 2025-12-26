@@ -162,6 +162,10 @@ fn is_game_installed(
 pub fn Game() -> Element {
     let selected_game_id = use_context::<Signal<Option<String>>>();
     
+    // Create video_state at Game level so it's stable
+    let video_state = use_signal(|| VideoState::new());
+    use_context_provider(|| video_state);
+    
     rsx! {
         rect {
             key: "game-root-stable",
@@ -230,8 +234,6 @@ fn GameContent(
             } 
         };
     };
-
-    let video_state = use_signal(|| VideoState::new());
 
     let Some(game_data) = ctx.api_games.iter().find(|g| &g.id == game_id_str).cloned() else {
         return rsx! { 
@@ -435,7 +437,6 @@ fn GameContent(
             height: "fill",
 
             BackgroundLayers {
-                key: "bg-layers-{game_id_str}",
                 crossfade: CrossfadeState {
                     prev_url: prev_url,
                     curr_url: curr_url,
@@ -447,7 +448,6 @@ fn GameContent(
                 prev_theme_url: prev_theme,
                 theme_fade_progress: theme_fade_progress,
                 static_bg_url: parsed_bg_url,
-                video_state: *video_state.read(),
                 on_video_ready: move |_| video_ready.set(true),
             }
 

@@ -3,14 +3,14 @@ use freya::prelude::*;
 use reqwest::Url;
 use backend::settings::GlobalSettings;
 use crate::{
-    components::{MyAnimatedCarousel, MyNetworkImage, preload_images, fetch_image},  // Added fetch_image
+    components::MyAnimatedCarousel,
+    components::MyNetworkImage,
     context::Context,
 };
 
 #[component]
 pub fn MyNewsWidget(game_id: String) -> Element {
     let ctx = use_context::<Context>();
-    let settings_sig = use_context::<Signal<Arc<RwLock<GlobalSettings>>>>();
     
     let mut carousel_index = use_signal(|| 0usize);
     let mut last_interaction = use_signal(|| std::time::Instant::now());
@@ -26,22 +26,8 @@ pub fn MyNewsWidget(game_id: String) -> Element {
     let banner_count = content.banners.len();
 
     let game_id_for_effect = game_id.clone();
-    let banners_for_effect = content.banners.clone();
-    #[allow(unused_variables)]
     use_effect(use_reactive!(|game_id_for_effect| {
         carousel_index.set(0);
-        
-        let urls: Vec<Url> = banners_for_effect.iter()
-            .filter_map(|b| b.image.url.parse().ok())
-            .collect();
-        
-        let cache_path = settings_sig.read()
-            .read()
-            .ok()
-            .map(|s| s.cache_directory.display().to_string())
-            .unwrap_or_default();
-
-        preload_images(urls, cache_path, |url| Box::pin(fetch_image(url)));
     }));
 
     use_effect(move || {

@@ -286,7 +286,6 @@ pub fn VideoBackgroundPlayer(video_url: String, on_ready: EventHandler<()>) -> E
 
     if player_state.read().active_url != video_url {
         let current_state = player_state.read();
-        
         current_state.cancel_token.cancel();
         
         if let Ok(mut guard) = current_state.shared_frame.lock() {
@@ -317,14 +316,12 @@ pub fn VideoBackgroundPlayer(video_url: String, on_ready: EventHandler<()>) -> E
 
         let (frame_ready_tx, mut frame_ready_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        // Spawn animation frame requester
         spawn(async move {
             while frame_ready_rx.recv().await.is_some() {
                 platform.request_animation_frame();
             }
         });
 
-        // Spawn video decoder
         spawn(async move {
             let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
             let cancel_check = cancel_token.clone();

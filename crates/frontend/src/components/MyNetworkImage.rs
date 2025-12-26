@@ -6,7 +6,6 @@ use reqwest::{Url, header::CONTENT_TYPE};
 use skia_safe::{AlphaType, ColorType, Data, EncodedImageFormat, ImageInfo};
 
 use backend::settings::GlobalSettings;
-use super::Preload::MEMORY_CACHE;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct MyNetworkImageProps {
@@ -60,15 +59,9 @@ pub fn MyNetworkImage(
         let cache_key = url_value.to_string();
         
         async move {
-            if let Some(cached_bytes) = MEMORY_CACHE.get(&cache_key) {
-                return Ok::<Bytes, String>(cached_bytes.value().clone());
-            }
-
             let bytes = match cacache::read(&cache_path_value, &cache_key).await {
                 Ok(disk_cache_bytes) => {
-                    let bytes = Bytes::from(disk_cache_bytes);
-                    MEMORY_CACHE.insert(cache_key, bytes.clone());
-                    bytes
+                    Bytes::from(disk_cache_bytes)
                 }
                 Err(_) => {
                     let fetched_bytes = fetch_image(url_value).await?;
@@ -82,7 +75,6 @@ pub fn MyNetworkImage(
                         }
                     });
                     
-                    MEMORY_CACHE.insert(cache_key, fetched_bytes.clone());
                     fetched_bytes
                 }
             };

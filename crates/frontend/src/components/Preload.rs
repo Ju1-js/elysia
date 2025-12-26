@@ -1,77 +1,85 @@
-use dashmap::DashMap;
 use bytes::Bytes;
 use reqwest::Url;
+use std::path::PathBuf;
 
-pub static MEMORY_CACHE: once_cell::sync::Lazy<DashMap<String, Bytes>> =
-    once_cell::sync::Lazy::new(|| DashMap::new());
+use super::fetch_image;
 
-pub fn preload_images(
-    urls: Vec<Url>,
-    cache_path: String,
-    fetch_image_fn: impl Fn(Url) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Bytes, String>> + Send>> + Send + 'static,
-) {
-    let urls_to_load: Vec<Url> = urls.into_iter()
-        .filter(|url| !MEMORY_CACHE.contains_key(&url.to_string()))
-        .collect();
-    
-    if urls_to_load.is_empty() {
-        return;
-    }
-    
+pub fn preload_images(urls: Vec<Url>, cache_path: String) {
     tokio::spawn(async move {
-        for url in urls_to_load {
+        for url in urls.into_iter() {
             let key = url.to_string();
             
-            if let Ok(asset) = cacache::read(&cache_path, &key).await {
-                let bytes = Bytes::from(asset);
-                MEMORY_CACHE.insert(key, bytes);
+            if cacache::read(&cache_path, &key).await.is_ok() {
                 continue;
             }
             
-            if let Ok(bytes) = fetch_image_fn(url).await {
-                MEMORY_CACHE.insert(key.clone(), bytes.clone());
+            if let Ok(bytes) = fetch_image(url).await {
                 let _ = cacache::write(&cache_path, &key, &bytes).await;
+                drop(bytes);
             }
+            
+            tokio::task::yield_now().await;
         }
     });
 }
 
-pub fn preload_videos(urls: Vec<Url>, cache_path: String, max_videos: usize) {
-    let urls_to_load: Vec<Url> = urls.into_iter()
-        .filter(|url| !MEMORY_CACHE.contains_key(&url.to_string()))
-        .take(max_videos)
-        .collect();
-    
-    if urls_to_load.is_empty() {
-        return;
-    }
-    
+pub fn preload_videos(urls: Vec<Url>, cache_dir: PathBuf, max_videos: usize) {
     tokio::spawn(async move {
-        for url in urls_to_load.into_iter() {
-            let key = url.to_string();
+        let videos_cache_dir = cache_dir.join("videos");
+        if tokio::fs::create_dir_all(&videos_cache_dir).await.is_err() {
+            return;
+        }
+        
+        for url in urls.into_iter().take(max_videos) {
+            let url_str = url.to_string();
             
-            if let Ok(asset) = cacache::read(&cache_path, &key).await {
-                let bytes = Bytes::from(asset);
-                MEMORY_CACHE.insert(key, bytes);
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            url_str.hash(&mut hasher);
+            
+            let cache_path = videos_cache_dir.join(format!("video_{:x}.webm", hasher.finish()));
+            
+            if cache_path.exists() {
                 continue;
             }
-
-            match reqwest::get(url.clone()).await {
-                Ok(res) => match res.bytes().await {
-                    Ok(bytes) => {
-                        MEMORY_CACHE.insert(key.clone(), bytes.clone());
-
-                        let cache_path_clone = cache_path.clone();
-                        tokio::spawn(async move {
-                            if let Err(e) = cacache::write(&cache_path_clone, &key, &bytes).await {
-                                eprintln!("Failed to cache video {}: {}", key, e);
+            
+            let temp_path = cache_path.with_extension("tmp");
+            
+            if let Ok(response) = reqwest::get(url).await {
+                if let Ok(mut file) = tokio::fs::File::create(&temp_path).await {
+                    use tokio_stream::StreamExt;
+                    use tokio::io::AsyncWriteExt;
+                    
+                    let mut stream = response.bytes_stream();
+                    let mut success = true;
+                    
+                    while let Some(chunk_result) = stream.next().await {
+                        if let Ok(chunk) = chunk_result {
+                            if file.write_all(&chunk).await.is_err() {
+                                success = false;
+                                break;
                             }
-                        });
+                        } else {
+                            success = false;
+                            break;
+                        }
                     }
-                    Err(e) => eprintln!("Failed to download video bytes from {}: {}", url, e),
-                },
-                Err(e) => eprintln!("Failed to fetch video from {}: {}", url, e),
+                    
+                    if success {
+                        success = file.flush().await.is_ok();
+                    }
+                    
+                    drop(file);
+                    
+                    if success {
+                        let _ = tokio::fs::rename(&temp_path, &cache_path).await;
+                    } else {
+                        let _ = tokio::fs::remove_file(&temp_path).await;
+                    }
+                }
             }
+            
+            tokio::task::yield_now().await;
         }
     });
 }
