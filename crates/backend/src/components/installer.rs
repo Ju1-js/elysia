@@ -17,7 +17,7 @@ pub async fn install_components(
     progress_tracker: Option<&ProgressTracker>,
     progress_key: &str,
 ) -> Result<HashMap<String, String>> {
-    let mut env_vars = HashMap::new();
+    let env_vars = HashMap::new();
     let total_steps = requirements.len();
     
     if total_steps == 0 {
@@ -50,14 +50,6 @@ pub async fn install_components(
                 });
 
                 steamrt::download_steamrt(settings, progress_callback).await?;
-            }
-            
-            let steamrt_setup = steamrt::prepare_steamrt(settings).await?;
-            if let Some(runtime_path) = steamrt_setup.runtime_path {
-                env_vars.insert(
-                    "RUNTIMEPATH".to_string(),
-                    runtime_path.display().to_string(),
-                );
             }
         } else {
             if component_manager.is_installed(settings, req.component_type) {
