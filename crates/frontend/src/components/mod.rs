@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 #![allow(unused_imports)]
 
-mod DownloadControl;
+mod download_control; 
 mod Expand;
 mod MyAnimatedCarousel;
 mod MyButton;
@@ -11,7 +11,7 @@ mod MySidebarItem;
 mod Preload;
 mod VideoBackgroundPlayer;
 
-pub use DownloadControl::*;
+pub use download_control::*;
 pub use Expand::*;
 pub use MyAnimatedCarousel::*;
 pub use MyButton::*;

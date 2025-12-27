@@ -29,6 +29,7 @@ impl Runner for Proton {
         cmd.env("PROTONPATH", &proton_path)
            .env("WINEPREFIX", &prefix)
            .env("PROTONFIXES_DISABLE", "1")
+           .env("UMU_RUNTIME_UPDATE", "0")
            .env("WINEDEBUG", "");
         
         if needs_jadeite {

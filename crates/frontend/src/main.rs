@@ -153,6 +153,9 @@ fn app() -> Element {
     });
 
     use_context_provider(move || context);
+
+    let system_status = use_signal(|| None::<backend::status::SystemStatus>);
+    use_context_provider(|| system_status);
     
     let preload_settings = settings.clone();
     let mut has_preloaded = use_signal(|| false);

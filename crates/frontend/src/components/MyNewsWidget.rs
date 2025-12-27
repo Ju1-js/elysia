@@ -26,6 +26,7 @@ pub fn MyNewsWidget(game_id: String) -> Element {
     let banner_count = content.banners.len();
 
     let game_id_for_effect = game_id.clone();
+    #[allow(unused_variables)]
     use_effect(use_reactive!(|game_id_for_effect| {
         carousel_index.set(0);
     }));

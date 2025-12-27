@@ -1,40 +1,27 @@
 use anyhow::Result;
-use async_trait::async_trait;
 use reqwest::Url;
+use crate::components::ComponentVersion;
+use common::git;
 
-use crate::components::{Component, ComponentVersion};
-
-pub struct Dxvk {}
-
-#[async_trait]
-impl Component for Dxvk {
-    fn name(&self) -> &'static str {
-        "dxvk"
-    }
-
-    fn display_name(&self) -> &'static str {
-        "DXVK"
-    }
-
-    async fn fetch_versions(&self) -> Result<Vec<ComponentVersion>> {
-        let repo = "doitsujin/dxvk";
-        let releases = common::git::github_releases(repo).await?;
-        let versions = releases.into_iter().filter_map(|rel| {
+pub async fn fetch_versions() -> Result<Vec<ComponentVersion>> {
+    let repo = "doitsujin/dxvk";
+    let releases = git::github_releases(repo).await?;
+    
+    let versions = releases
+        .into_iter()
+        .filter_map(|rel| {
+            let version = &rel.tag_name[1..];
             rel.assets
                 .iter()
-                .filter_map(|asset| {
-                    let version = &rel.tag_name[1..];
-                    if asset.name == format!("dxvk-{}.tar.gz", version) {
-                        Some(ComponentVersion {
-                            version: rel.tag_name.clone(),
-                            download_url: Url::parse(&rel.assets_url).ok()?,
-                        })
-                    } else {
-                        None
-                    }
+                .find(|asset| asset.name == format!("dxvk-{}.tar.gz", version))
+                .and_then(|asset| {
+                    Some(ComponentVersion {
+                        version: rel.tag_name.clone(),
+                        download_url: Url::parse(&asset.browser_download_url).ok()?,
+                    })
                 })
-                .next()
-        });
-        Ok(versions.collect())
-    }
+        })
+        .collect();
+    
+    Ok(versions)
 }

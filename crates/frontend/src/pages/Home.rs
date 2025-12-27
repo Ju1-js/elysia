@@ -1,8 +1,26 @@
 use freya::prelude::*;
+use std::sync::{Arc, RwLock};
+use backend::{settings::GlobalSettings, status::SystemStatus};
 
-#[allow(non_snake_case)]
 #[component]
 pub fn Home() -> Element {
+    let settings = use_context::<Signal<Arc<RwLock<GlobalSettings>>>>();
+    let mut system_status = use_context::<Signal<Option<SystemStatus>>>();
+    
+    // Check component status once on Home page mount
+    use_effect(use_reactive!(|| {
+        let settings_arc = settings.read().clone();
+        spawn(async move {
+            if let Ok(s) = settings_arc.read() {
+                println!("[HOME] Checking system component status...");
+                let status = SystemStatus::check(&s).await;
+                println!("[HOME] Status check complete - Runtime ready: {}, Tweaks ready: {}", 
+                    status.runtime_ready(), status.tweaks_ready());
+                system_status.set(Some(status));
+            }
+        });
+    }));
+    
     rsx! {
         rect {
             width: "fill",
@@ -10,6 +28,7 @@ pub fn Home() -> Element {
             cross_align: "center",
             main_align: "center",
             direction: "vertical",
+            
             rect {
                 position: "absolute",
                 position_top: "0",
@@ -18,7 +37,8 @@ pub fn Home() -> Element {
                 height: "100%",
                 layer: "-1",
                 background: "linear-gradient(135deg, rgb(30,30,40) 0%, rgb(15,15,20) 100%)",
-            },
+            }
+            
             rect {
                 direction: "vertical",
                 cross_align: "center",
@@ -30,26 +50,37 @@ pub fn Home() -> Element {
                 shadow: "0 8 32 0 rgb(0, 0, 0, 60)",
                 backdrop_blur: "16",
                 max_width: "600",
+                
                 image {
                     width: "120",
                     height: "120",
                     sampling: "trilinear",
                     image_data: static_bytes(include_bytes!("../../../../assets/elysia.png"))
-                },
+                }
+                
                 label {
                     font_family: "Noto Sans",
                     font_size: "32",
                     font_weight: "700",
                     "Welcome to Elysia!"
-                },
+                }
+                
                 label {
                     font_family: "Noto Sans",
                     font_size: "16",
                     color: "rgb(200,200,210)",
                     text_align: "center",
                     "Select a game from the sidebar to get started."
-                },
-            },
+                }
+                
+                if system_status.read().is_none() {
+                    label {
+                        font_size: "14",
+                        color: "rgb(150,150,160)",
+                        "Checking system components..."
+                    }
+                }
+            }
         }
     }
 }
