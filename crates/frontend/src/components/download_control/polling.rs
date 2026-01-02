@@ -31,14 +31,9 @@ pub fn poll_runtime_setup(
                 if let Some(p) = get_progress(&key) {
                     progress.set(Some(p));
                 } else {
-                    let state_arc = game_state.read().clone();
-                    if let Ok(mut state) = state_arc.write() {
-                        state.set_runtime_ready(true);
-                        state.set_runtime_active(false);
-                    }
-
-                    // Trigger signal update to notify UI
-                    game_state.write();
+                    game_state.write().set_runtime_ready(true);
+                    game_state.write().set_runtime_active(false);
+                    eprintln!("[POLLING] Set runtime_ready=true, runtime_active=false");
                     
                     progress.set(None);
                     break;
@@ -81,14 +76,8 @@ pub fn poll_tweaks_setup(
                 if let Some(p) = get_progress(&key) {
                     progress.set(Some(p));
                 } else {
-                    let state_arc = game_state.read().clone();
-                    if let Ok(mut state) = state_arc.write() {
-                        state.set_tweaks_ready(&game_id, true);
-                        state.set_tweaks_active(&game_id, false);
-                    }
-
-                    // Trigger signal update to notify UI
-                    game_state.write();
+                    game_state.write().set_tweaks_ready(&game_id, true);
+                    game_state.write().set_tweaks_active(&game_id, false);
                     
                     progress.set(None);
                     break;
@@ -131,25 +120,24 @@ pub fn poll_download(
                 let current = get_progress(&key);
                 
                 // Update global state
-                let state_arc = game_state.read().clone();
-                if let Ok(mut state) = state_arc.write() {
-                    state.set_download_progress(&game_id, current.clone());
+                let mut state = game_state.write();
+                state.set_download_progress(&game_id, current.clone());
+                
+                if let Some(ref p) = current {
+                    let is_complete = !p.is_busy && p.downloaded == p.total && p.total > 0;
                     
-                    if let Some(ref p) = current {
-                        let is_complete = !p.is_busy && p.downloaded == p.total && p.total > 0;
-                        
-                        if is_complete {
-                            state.set_download_installed(&game_id, true);
-                        }
-                        
-                        if !p.is_busy {
-                            state.set_download_active(&game_id, false);
-                        }
+                    if is_complete {
+                        state.set_download_installed(&game_id, true);
+                    }
+                    
+                    if !p.is_busy {
+                        state.set_download_active(&game_id, false);
                     }
                 }
+                
+                drop(state);
 
                 // Update local display
-                game_state.write();
                 progress.set(current.clone());
                 
                 if let Some(p) = current {

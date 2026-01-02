@@ -60,31 +60,26 @@ pub fn create_game_download_handler(
             }
         }
 
-        let game_id_owned = game_id.clone();
-        let biz_owned = biz.clone();
+        let game_id_clone = game_id.clone();
+        let biz_clone = biz.clone();
         let mut settings_mut = settings;
-        let mut state = game_state;
+        let mut state_signal = game_state;
         
-        // Mark download as active in global state
-        if let Ok(mut gs) = state.write().write() {
-            gs.set_download_active(&game_id_owned, true);
-        }
+        state_signal.write().set_download_active(&game_id_clone, true);
 
         spawn(async move {
             let installer = {
                 let settings_guard = match settings_arc.read() {
                     Ok(s) => s,
                     Err(_) => {
-                        if let Ok(mut gs) = state.write().write() {
-                            gs.set_download_active(&game_id_owned, false);
-                        }
+                        state_signal.write().set_download_active(&game_id_clone, false);
                         return;
                     }
                 };
                 
                 InstallerManager::create_installer(
-                    &game_id_owned,
-                    &biz_owned,
+                    &game_id_clone,
+                    &biz_clone,
                     settings_guard.temp_directory.clone(),
                     settings_guard.components_directory.clone(),
                 )
@@ -94,7 +89,7 @@ pub fn create_game_download_handler(
                 match inst.install().await {
                     Ok(installed_game) => {
                         if let Ok(mut settings_guard) = settings_arc.write() {
-                            settings_guard.installed_games.insert(game_id_owned.clone(), installed_game);
+                            settings_guard.installed_games.insert(game_id_clone.clone(), installed_game);
                             
                             if let Err(e) = settings_guard.save() {
                                 eprintln!("Failed to save settings: {}", e);
@@ -105,10 +100,7 @@ pub fn create_game_download_handler(
                             }
                         }
                         
-                        // Mark as installed in global state
-                        if let Ok(mut gs) = state.write().write() {
-                            gs.set_download_installed(&game_id_owned, true);
-                        }
+                        state_signal.write().set_download_installed(&game_id_clone, true);
                     }
                     Err(e) => {
                         eprintln!("Failed to install game: {}", e);
@@ -116,11 +108,7 @@ pub fn create_game_download_handler(
                 }
             }
             
-            // Mark download as inactive in global state
-            if let Ok(mut gs) = state.write().write() {
-                gs.set_download_active(&game_id_owned, false);
-            }
+            state_signal.write().set_download_active(&game_id_clone, false);
         });
     })
 }
-

@@ -20,7 +20,10 @@ use backend::{
     game_providers::hoyoplay::{get_game_content, get_games, get_video_url},
     runners::{Runners, Wine},
     settings::{GlobalSettings, InstalledGame, RuntimeComponents},
+    status::SystemStatus,
+    components::tweaks::TweakManifest,
 };
+use crate::pages::state::GlobalGameState;
 
 fn main() {
     launch_cfg(
@@ -154,8 +157,61 @@ fn app() -> Element {
 
     use_context_provider(move || context);
 
-    let system_status = use_signal(|| None::<backend::status::SystemStatus>);
+    let mut system_status = use_signal(|| None::<SystemStatus>);
     use_context_provider(|| system_status);
+    
+    // Initialize game state
+    let game_state = use_signal(|| GlobalGameState::new());
+    use_context_provider(|| game_state);
+
+    let init_settings = settings.clone();
+    let mut game_state_initialized = use_signal(|| false);
+    
+    use_effect(move || {
+        if !game_state_initialized() {
+            let settings_clone = init_settings.read().clone();
+            let mut state_signal = game_state;
+            
+            spawn(async move {
+                // Check system status
+                let settings_guard = match settings_clone.read() {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("Failed to read settings for initialization: {}", e);
+                        return;
+                    }
+                };
+                
+                let sys_status = SystemStatus::check(&settings_guard).await;
+                drop(settings_guard);
+                system_status.set(Some(sys_status.clone()));
+                
+                let runtime_ready = check_runtime_components(&sys_status);
+                eprintln!("[INIT] Setting runtime_ready to: {}", runtime_ready);
+                
+                let manifest = TweakManifest::new();
+                let jadeite_ready = check_jadeite_installed(&sys_status);
+                
+                // Modify state directly
+                state_signal.write().set_runtime_ready(runtime_ready);
+                
+                if let Some(ctx) = context.read_unchecked().as_ref() {
+                    for game in &ctx.api_games {
+                        if manifest.needs_jadeite(&game.id) {
+                            state_signal.write().set_tweaks_ready(&game.id, jadeite_ready);
+                        }
+                        
+                        if let Ok(settings) = settings_clone.read() {
+                            let installed = settings.installed_games.contains_key(&game.id);
+                            state_signal.write().set_download_installed(&game.id, installed);
+                        }
+                    }
+                }
+                
+                game_state_initialized.set(true);
+            });
+        }
+    });
     
     let preload_settings = settings.clone();
     let mut has_preloaded = use_signal(|| false);
@@ -222,4 +278,12 @@ fn app() -> Element {
     });
     
     layout::app()
+}
+
+fn check_runtime_components(status: &SystemStatus) -> bool {
+    status.runtime_ready()
+}
+
+fn check_jadeite_installed(status: &SystemStatus) -> bool {
+    status.tweaks_ready()
 }

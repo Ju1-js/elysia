@@ -65,7 +65,6 @@ pub fn MyNewsWidget(game_id: String) -> Element {
                     padding: "0",
                     corner_radius: "16",
                     overflow: "clip",
-                    shadow: "0 8 32 0 rgb(0, 0, 0, 100), 0 2 8 0 rgb(0, 0, 0, 80)",
                     
                     MyAnimatedCarousel {
                         key: "{game_id}",
@@ -97,9 +96,7 @@ pub fn MyNewsWidget(game_id: String) -> Element {
                         spacing: "7",
                         padding: "6 14",
                         background: "rgb(0, 0, 0, 0.7)",
-                        backdrop_blur: "16",
                         corner_radius: "16",
-                        shadow: "0 4 12 0 rgb(0, 0, 0, 80)",
                         
                         for i in 0..banner_count {
                             rect {

@@ -94,21 +94,17 @@ pub fn create_runtime_setup_handler(
 ) -> EventHandler<PressEvent> {
     EventHandler::new(move |_| {
         // Mark runtime setup as active
-        if let Ok(mut state) = game_state.write().write() {
-            state.runtime_setup.active = true;
-        }
+        game_state.write().runtime_setup.active = true;
 
         let settings_arc = settings.read().clone();
         let tracker = progress_tracker.clone();
-        let mut state = game_state;
+        let mut state_signal = game_state;
 
         spawn(async move {
             let settings_guard = match settings_arc.read() {
                 Ok(s) => s,
                 Err(_) => {
-                    if let Ok(mut gs) = state.write().write() {
-                        gs.runtime_setup.active = false;
-                    }
+                    state_signal.write().runtime_setup.active = false;
                     return;
                 }
             };
@@ -130,9 +126,7 @@ pub fn create_runtime_setup_handler(
                 "runtime_setup",
             ).await {
                 Ok(_) => {
-                    if let Ok(mut gs) = state.write().write() {
-                        gs.runtime_setup.ready = true;
-                    }
+                    state_signal.write().runtime_setup.ready = true;
                     
                     drop(settings_guard);
                     if let Ok(s) = settings_arc.read() {
@@ -146,9 +140,7 @@ pub fn create_runtime_setup_handler(
             }
 
             tracker.clear("runtime_setup");
-            if let Ok(mut gs) = state.write().write() {
-                gs.runtime_setup.active = false;
-            }
+            state_signal.write().runtime_setup.active = false;
         });
     })
 }
@@ -164,22 +156,17 @@ pub fn create_tweaks_setup_handler(
         let game_id_clone = game_id.clone();
         
         // Mark tweaks setup as active
-        if let Ok(mut state) = game_state.write().write() {
-            state.set_tweaks_active(&game_id_clone, true);
-        }
+        game_state.write().set_tweaks_active(&game_id_clone, true);
 
         let settings_arc = settings.read().clone();
-        let game_id_owned = game_id.clone();
         let tracker = progress_tracker.clone();
-        let mut state = game_state;
+        let mut state_signal = game_state;
 
         spawn(async move {
             let settings_guard = match settings_arc.read() {
                 Ok(s) => s,
                 Err(_) => {
-                    if let Ok(mut gs) = state.write().write() {
-                        gs.set_tweaks_active(&game_id_owned, false);
-                    }
+                    state_signal.write().set_tweaks_active(&game_id_clone, false);
                     return;
                 }
             };
@@ -188,24 +175,20 @@ pub fn create_tweaks_setup_handler(
             
             if let Err(e) = component_manager.refresh_component(ComponentType::Jadeite).await {
                 eprintln!("[TWEAKS_SETUP] Failed to refresh Jadeite: {}", e);
-                if let Ok(mut gs) = state.write().write() {
-                    gs.set_tweaks_active(&game_id_owned, false);
-                }
+                state_signal.write().set_tweaks_active(&game_id_clone, false);
                 tracker.clear("tweaks_setup");
                 return;
             }
 
             match backend::runners::Runners::download_tweaks(
                 &settings_guard,
-                &game_id_owned,
+                &game_id_clone,
                 &component_manager,
                 Some(&tracker),
                 "tweaks_setup",
             ).await {
                 Ok(_) => {
-                    if let Ok(mut gs) = state.write().write() {
-                        gs.set_tweaks_ready(&game_id_owned, true);
-                    }
+                    state_signal.write().set_tweaks_ready(&game_id_clone, true);
                     
                     drop(settings_guard);
                     if let Ok(s) = settings_arc.read() {
@@ -219,9 +202,7 @@ pub fn create_tweaks_setup_handler(
             }
 
             tracker.clear("tweaks_setup");
-            if let Ok(mut gs) = state.write().write() {
-                gs.set_tweaks_active(&game_id_owned, false);
-            }
+            state_signal.write().set_tweaks_active(&game_id_clone, false);
         });
     })
 }

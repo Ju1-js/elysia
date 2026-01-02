@@ -7,7 +7,7 @@ use polling::{poll_runtime_setup, poll_tweaks_setup, poll_download};
 use freya::prelude::*;
 use std::rc::Rc;
 
-#[derive(Props, Clone)]
+#[derive(Props)]
 pub struct DownloadControlProps {
     pub game_id: String,
     pub game_name: String,
@@ -24,6 +24,7 @@ pub struct DownloadControlProps {
     #[props(default)]
     pub on_download_game: Option<EventHandler<PressEvent>>,
     pub game_state: crate::pages::GlobalGameStateSignal,
+    pub game_needs_tweaks: bool,
 }
 
 impl PartialEq for DownloadControlProps {
@@ -32,6 +33,26 @@ impl PartialEq for DownloadControlProps {
             && self.game_name == other.game_name
             && self.game_progress_key == other.game_progress_key
             && self.accent_color == other.accent_color
+            && self.game_needs_tweaks == other.game_needs_tweaks
+    }
+}
+
+impl Clone for DownloadControlProps {
+    fn clone(&self) -> Self {
+        Self {
+            game_id: self.game_id.clone(),
+            game_name: self.game_name.clone(),
+            game_progress_key: self.game_progress_key.clone(),
+            get_game_progress: self.get_game_progress.clone(),
+            get_runtime_progress: self.get_runtime_progress.clone(),
+            get_tweaks_progress: self.get_tweaks_progress.clone(),
+            accent_color: self.accent_color.clone(),
+            on_setup_runtime: self.on_setup_runtime.clone(),
+            on_setup_tweaks: self.on_setup_tweaks.clone(),
+            on_download_game: self.on_download_game.clone(),
+            game_state: self.game_state,
+            game_needs_tweaks: self.game_needs_tweaks,
+        }
     }
 }
 
@@ -49,6 +70,7 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
         on_setup_tweaks,
         on_download_game,
         game_state,
+        game_needs_tweaks,
     } = props;
 
     let ButtonTheme { font_theme, .. } = use_applied_theme!(&None, filled_button);
@@ -58,49 +80,37 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
     let tweaks_progress = use_signal(|| None::<types::SetupProgress>);
     let game_progress = use_signal(|| None::<types::DownloadProgress>);
 
-    let runtime_active = use_memo(move || {
-        game_state.read().read().ok().map(|s| s.runtime_setup.active).unwrap_or(false)
-    });
-    
-    let runtime_ready = use_memo(move || {
-        game_state.read().read().ok().map(|s| s.runtime_setup.ready).unwrap_or(false)
-    });
-    
-    let tweaks_active = use_memo({
-        let game_id = game_id.clone();
-        move || {
-            game_state.read().read().ok()
-                .map(|s| s.get_tweaks_state(&game_id).active)
-                .unwrap_or(false)
+    let runtime_active = use_memo(use_reactive!(|game_state| {
+        let active = game_state.read().runtime_setup.active;
+        eprintln!("[DownloadControl] runtime_active: {}", active);
+        active
+    }));
+
+    let runtime_ready = use_memo(use_reactive!(|game_state| {
+        let ready = game_state.read().runtime_setup.ready;
+        eprintln!("[DownloadControl] runtime_ready: {}", ready);
+        ready
+    }));
+
+    let tweaks_active = use_memo(use_reactive!(|game_state, game_id| {
+        game_state.read().get_tweaks_state(&game_id).active
+    }));
+
+    let tweaks_ready = use_memo(use_reactive!(|game_state, game_id, game_needs_tweaks| {
+        if !game_needs_tweaks {
+            return true;
         }
-    });
-    
-    let tweaks_ready = use_memo({
-        let game_id = game_id.clone();
-        move || {
-            game_state.read().read().ok()
-                .map(|s| s.get_tweaks_state(&game_id).ready)
-                .unwrap_or(false)
-        }
-    });
-    
-    let is_downloading = use_memo({
-        let game_id = game_id.clone();
-        move || {
-            game_state.read().read().ok()
-                .map(|s| s.get_download_state(&game_id).active)
-                .unwrap_or(false)
-        }
-    });
-    
-    let is_installed = use_memo({
-        let game_id = game_id.clone();
-        move || {
-            game_state.read().read().ok()
-                .map(|s| s.get_download_state(&game_id).installed)
-                .unwrap_or(false)
-        }
-    });
+        
+        game_state.read().get_tweaks_state(&game_id).ready
+    }));
+
+    let is_downloading = use_memo(use_reactive!(|game_state, game_id| {
+        game_state.read().get_download_state(&game_id).active
+    }));
+
+    let is_installed = use_memo(use_reactive!(|game_state, game_id| {
+        game_state.read().get_download_state(&game_id).installed
+    }));
     
     // Convert memos to signals for polling functions
     let mut runtime_active_signal = use_signal(move || *runtime_active.read());
@@ -166,12 +176,14 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
                 }
             }
             
-            if let Some(setup) = tweaks_progress.read().as_ref() {
-                SetupWidget {
-                    setup: setup.clone(),
-                    title: "Tweaks Setup",
-                    accent: accent_color.clone(),
-                    font: font_theme.clone(),
+            if game_needs_tweaks {
+                if let Some(setup) = tweaks_progress.read().as_ref() {
+                    SetupWidget {
+                        setup: setup.clone(),
+                        title: "Tweaks Setup",
+                        accent: accent_color.clone(),
+                        font: font_theme.clone(),
+                    }
                 }
             }
             
@@ -193,6 +205,7 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
                 runtime_busy,
                 tweaks_busy,
                 game_busy,
+                game_needs_tweaks,
                 on_setup_runtime,
                 on_setup_tweaks,
                 on_download_game,
@@ -209,23 +222,29 @@ fn ActionButton(
     runtime_busy: bool,
     tweaks_busy: bool,
     game_busy: bool,
+    game_needs_tweaks: bool,
     on_setup_runtime: Option<EventHandler<PressEvent>>,
     on_setup_tweaks: Option<EventHandler<PressEvent>>,
     on_download_game: Option<EventHandler<PressEvent>>,
 ) -> Element {
+    eprintln!("[ActionButton] runtime_ready: {}, tweaks_ready: {}, installed: {}, runtime_busy: {}, tweaks_busy: {}, game_busy: {}, game_needs_tweaks: {}", 
+        runtime_ready, tweaks_ready, installed, runtime_busy, tweaks_busy, game_busy, game_needs_tweaks);
+    
     if runtime_busy || tweaks_busy || game_busy {
         return rsx! {};
     }
     
     let (label, handler) = if !runtime_ready {
         ("Download Runtime Setup", on_setup_runtime)
-    } else if !tweaks_ready {
+    } else if game_needs_tweaks && !tweaks_ready {
         ("Download Tweaks", on_setup_tweaks)
     } else if !installed {
         ("Download Game", on_download_game)
     } else {
         ("Start Game", on_download_game)
     };
+
+    eprintln!("[ActionButton] Showing button: {}", label);
 
     rsx! {
         crate::components::MyButton {

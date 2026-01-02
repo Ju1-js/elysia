@@ -11,6 +11,7 @@ use backend::{
     settings::GlobalSettings,
     game_providers::hoyoplay::{get_video_url, get_theme_url},
     progress::ProgressTracker,
+    components::tweaks::TweakManifest,
 };
 use crate::layout::GamePageState;
 
@@ -28,6 +29,7 @@ pub fn GameContent(
     let settings = use_context::<Signal<Arc<RwLock<GlobalSettings>>>>();
     let mut page_state = use_context::<Signal<GamePageState>>();
     let game_state = use_context::<GlobalGameStateSignal>();
+    let tweak_manifest = use_signal(|| TweakManifest::new());
     
     let video_fade = use_animation(move |_| {
         AnimNum::new(0.0, 1.0).time(700).ease(Ease::InOut).function(Function::Cubic)
@@ -281,6 +283,9 @@ pub fn GameContent(
         game_state,
     );
 
+    // fixme: not only jadeite
+    let game_needs_tweaks = tweak_manifest.read().needs_jadeite(&game_data.id);
+
     let settings_scale = if show_settings() {
         if settings_scale_anim.is_running() {
             settings_scale_anim.get().read().read() as f64
@@ -347,15 +352,13 @@ pub fn GameContent(
                         
                         rect {
                             key: "news-widget-container",
-                            width: "400",
-                            height: "240",
+                            width: "350",
+                            height: "200",
                             
                             if let Some(prev_game) = news_prev_game.peek().clone() {
                                 rect {
                                     key: "news-widget-prev-{prev_game}",
                                     position: "absolute",
-                                    width: "400",
-                                    height: "240",
                                     opacity: "{1.0 - news_fade_progress}",
                                     offset_x: "{-50.0 * news_fade_progress}",
                                     MyNewsWidget {
@@ -368,8 +371,6 @@ pub fn GameContent(
                                 rect {
                                     key: "news-widget-curr-{curr_game}",
                                     position: "absolute",
-                                    width: "400",
-                                    height: "240",
                                     opacity: "{news_fade_progress}",
                                     offset_x: "{50.0 - (50.0 * news_fade_progress)}",
                                     MyNewsWidget {
@@ -393,6 +394,7 @@ pub fn GameContent(
                                 on_setup_tweaks,
                                 on_download_game,
                                 game_state,
+                                game_needs_tweaks,
                             }
                         }
                     }

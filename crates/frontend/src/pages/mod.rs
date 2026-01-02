@@ -2,7 +2,7 @@
 #![allow(unused_imports)]
 
 mod Error;
-mod game;
+pub mod game;
 mod Home;
 
 pub use Error::*;

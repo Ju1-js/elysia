@@ -4,7 +4,7 @@ mod game_settings;
 mod handlers;
 mod content;
 mod helpers;
-mod state;
+pub mod state;
 
 use freya::prelude::*;
 use content::GameContent;

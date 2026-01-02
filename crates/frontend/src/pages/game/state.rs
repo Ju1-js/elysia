@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
 use freya::prelude::*;
 use crate::components::DownloadProgress;
 
@@ -94,4 +93,4 @@ impl GlobalGameState {
     }
 }
 
-pub type GlobalGameStateSignal = Signal<Arc<RwLock<GlobalGameState>>>;
+pub type GlobalGameStateSignal = Signal<GlobalGameState>;
