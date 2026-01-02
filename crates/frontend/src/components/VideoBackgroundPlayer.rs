@@ -23,7 +23,6 @@ struct VideoFrame {
 struct VideoPlayerState {
     shared_frame: Arc<Mutex<Option<VideoFrame>>>,
     cancel_token: CancellationToken,
-    generation: u64,
 }
 
 fn generate_cache_filename(url: &str) -> String {
@@ -299,7 +298,6 @@ pub fn VideoBackgroundPlayer(video_url: String, on_ready: EventHandler<()>) -> E
     let settings_signal = use_context::<Signal<Arc<std::sync::RwLock<GlobalSettings>>>>();
     let platform = use_platform();
 
-    let mut generation_counter = use_signal(|| 0u64);
     let mut player_state = use_signal(|| None::<VideoPlayerState>);
     let mut last_url = use_signal(|| String::new());
 
@@ -316,13 +314,9 @@ pub fn VideoBackgroundPlayer(video_url: String, on_ready: EventHandler<()>) -> E
         }
         
         // Create new player state
-        let next_generation = *generation_counter.read() + 1;
-        generation_counter.set(next_generation);
-        
         player_state.set(Some(VideoPlayerState {
             shared_frame: Arc::new(Mutex::new(None)),
             cancel_token: CancellationToken::new(),
-            generation: next_generation,
         }));
         
         last_url.set(current_url.clone());

@@ -100,7 +100,7 @@ pub fn MyNetworkImage(
                 }
             }
         }
-        Some(Err(error)) => {
+        Some(Err(_)) => {
             if let Some(fallback_element) = fallback {
                 rsx! {{ fallback_element }}
             } else {
