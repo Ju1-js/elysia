@@ -1,6 +1,5 @@
 use std::sync::{Arc, RwLock};
 use freya::prelude::*;
-
 use crate::components::DownloadProgress;
 use backend::{
     settings::GlobalSettings,
@@ -8,24 +7,23 @@ use backend::{
     runners::Runner,
 };
 
+use super::state::GlobalGameStateSignal;
+
 pub fn create_progress_getter(
     settings: Signal<Arc<RwLock<GlobalSettings>>>,
     game_id: String,
     biz: String,
 ) -> (String, std::rc::Rc<dyn Fn(&str) -> Option<DownloadProgress>>) {
     let key = format!("{}_streaming", game_id);
-    
     let getter = std::rc::Rc::new(move |progress_key: &str| {
         let settings_guard = settings.read();
         let s = settings_guard.read().ok()?;
-        
         let installer = InstallerManager::create_installer(
             &game_id,
             &biz,
             s.temp_directory.clone(),
             s.components_directory.clone(),
         )?;
-        
         installer.get_progress(progress_key).map(|p| DownloadProgress {
             downloaded: p.downloaded,
             total: p.total,
@@ -34,7 +32,7 @@ pub fn create_progress_getter(
             is_busy: p.is_busy,
         })
     });
-
+    
     (key, getter)
 }
 
@@ -42,11 +40,12 @@ pub fn create_game_download_handler(
     settings: Signal<Arc<RwLock<GlobalSettings>>>,
     game_id: String,
     biz: String,
-    mut is_downloading: Signal<bool>,
+    game_state: GlobalGameStateSignal,
 ) -> EventHandler<PressEvent> {
     EventHandler::new(move |_| {
         let settings_arc = settings.read().clone();
         
+        // Check if game is already installed and run it
         {
             let settings_guard = match settings_arc.read() {
                 Ok(s) => s,
@@ -64,18 +63,25 @@ pub fn create_game_download_handler(
         let game_id_owned = game_id.clone();
         let biz_owned = biz.clone();
         let mut settings_mut = settings;
-        is_downloading.set(true);
+        let mut state = game_state;
+        
+        // Mark download as active in global state
+        if let Ok(mut gs) = state.write().write() {
+            gs.set_download_active(&game_id_owned, true);
+        }
 
         spawn(async move {
             let installer = {
                 let settings_guard = match settings_arc.read() {
                     Ok(s) => s,
                     Err(_) => {
-                        is_downloading.set(false);
+                        if let Ok(mut gs) = state.write().write() {
+                            gs.set_download_active(&game_id_owned, false);
+                        }
                         return;
                     }
                 };
-
+                
                 InstallerManager::create_installer(
                     &game_id_owned,
                     &biz_owned,
@@ -88,7 +94,8 @@ pub fn create_game_download_handler(
                 match inst.install().await {
                     Ok(installed_game) => {
                         if let Ok(mut settings_guard) = settings_arc.write() {
-                            settings_guard.installed_games.insert(game_id_owned, installed_game);
+                            settings_guard.installed_games.insert(game_id_owned.clone(), installed_game);
+                            
                             if let Err(e) = settings_guard.save() {
                                 eprintln!("Failed to save settings: {}", e);
                             } else {
@@ -97,33 +104,23 @@ pub fn create_game_download_handler(
                                 settings_mut.set(Arc::new(RwLock::new(new_settings)));
                             }
                         }
+                        
+                        // Mark as installed in global state
+                        if let Ok(mut gs) = state.write().write() {
+                            gs.set_download_installed(&game_id_owned, true);
+                        }
                     }
                     Err(e) => {
                         eprintln!("Failed to install game: {}", e);
                     }
                 }
             }
-
-            is_downloading.set(false);
+            
+            // Mark download as inactive in global state
+            if let Ok(mut gs) = state.write().write() {
+                gs.set_download_active(&game_id_owned, false);
+            }
         });
     })
 }
 
-pub fn is_game_installed(
-    settings: &Signal<Arc<RwLock<GlobalSettings>>>,
-    game_id: &str,
-    biz: &str,
-) -> bool {
-    let settings_guard = settings.read();
-    if let Ok(s) = settings_guard.read() {
-        InstallerManager::is_game_installed(
-            &s,
-            game_id,
-            biz,
-            s.temp_directory.clone(),
-            s.components_directory.clone(),
-        )
-    } else {
-        false
-    }
-}

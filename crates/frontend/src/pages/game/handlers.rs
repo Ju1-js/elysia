@@ -9,6 +9,8 @@ use backend::{
     status::SystemStatus,
 };
 
+use super::state::GlobalGameStateSignal;
+
 pub fn create_runtime_progress_getter(
     progress_tracker: ProgressTracker,
 ) -> std::rc::Rc<dyn Fn(&str) -> Option<SetupProgress>> {
@@ -86,23 +88,27 @@ pub fn create_tweaks_progress_getter(
 
 pub fn create_runtime_setup_handler(
     settings: Signal<Arc<RwLock<GlobalSettings>>>,
-    mut runtime_active: Signal<bool>,
-    mut runtime_ready: Signal<bool>,
-    mut runtime_needs_update: Signal<bool>,
     progress_tracker: ProgressTracker,
     mut system_status: Signal<Option<SystemStatus>>,
+    mut game_state: GlobalGameStateSignal,
 ) -> EventHandler<PressEvent> {
     EventHandler::new(move |_| {
-        runtime_active.set(true);
+        // Mark runtime setup as active
+        if let Ok(mut state) = game_state.write().write() {
+            state.runtime_setup.active = true;
+        }
 
         let settings_arc = settings.read().clone();
         let tracker = progress_tracker.clone();
+        let mut state = game_state;
 
         spawn(async move {
             let settings_guard = match settings_arc.read() {
                 Ok(s) => s,
                 Err(_) => {
-                    runtime_active.set(false);
+                    if let Ok(mut gs) = state.write().write() {
+                        gs.runtime_setup.active = false;
+                    }
                     return;
                 }
             };
@@ -124,8 +130,9 @@ pub fn create_runtime_setup_handler(
                 "runtime_setup",
             ).await {
                 Ok(_) => {
-                    runtime_ready.set(true);
-                    runtime_needs_update.set(false);
+                    if let Ok(mut gs) = state.write().write() {
+                        gs.runtime_setup.ready = true;
+                    }
                     
                     drop(settings_guard);
                     if let Ok(s) = settings_arc.read() {
@@ -139,7 +146,9 @@ pub fn create_runtime_setup_handler(
             }
 
             tracker.clear("runtime_setup");
-            runtime_active.set(false);
+            if let Ok(mut gs) = state.write().write() {
+                gs.runtime_setup.active = false;
+            }
         });
     })
 }
@@ -147,24 +156,30 @@ pub fn create_runtime_setup_handler(
 pub fn create_tweaks_setup_handler(
     settings: Signal<Arc<RwLock<GlobalSettings>>>,
     game_id: String,
-    mut tweaks_active: Signal<bool>,
-    mut tweaks_ready: Signal<bool>,
-    mut tweaks_need_update: Signal<bool>,
     progress_tracker: ProgressTracker,
     mut system_status: Signal<Option<SystemStatus>>,
+    mut game_state: GlobalGameStateSignal,
 ) -> EventHandler<PressEvent> {
     EventHandler::new(move |_| {
-        tweaks_active.set(true);
+        let game_id_clone = game_id.clone();
+        
+        // Mark tweaks setup as active
+        if let Ok(mut state) = game_state.write().write() {
+            state.set_tweaks_active(&game_id_clone, true);
+        }
 
         let settings_arc = settings.read().clone();
         let game_id_owned = game_id.clone();
         let tracker = progress_tracker.clone();
+        let mut state = game_state;
 
         spawn(async move {
             let settings_guard = match settings_arc.read() {
                 Ok(s) => s,
                 Err(_) => {
-                    tweaks_active.set(false);
+                    if let Ok(mut gs) = state.write().write() {
+                        gs.set_tweaks_active(&game_id_owned, false);
+                    }
                     return;
                 }
             };
@@ -173,7 +188,9 @@ pub fn create_tweaks_setup_handler(
             
             if let Err(e) = component_manager.refresh_component(ComponentType::Jadeite).await {
                 eprintln!("[TWEAKS_SETUP] Failed to refresh Jadeite: {}", e);
-                tweaks_active.set(false);
+                if let Ok(mut gs) = state.write().write() {
+                    gs.set_tweaks_active(&game_id_owned, false);
+                }
                 tracker.clear("tweaks_setup");
                 return;
             }
@@ -186,8 +203,9 @@ pub fn create_tweaks_setup_handler(
                 "tweaks_setup",
             ).await {
                 Ok(_) => {
-                    tweaks_ready.set(true);
-                    tweaks_need_update.set(false);
+                    if let Ok(mut gs) = state.write().write() {
+                        gs.set_tweaks_ready(&game_id_owned, true);
+                    }
                     
                     drop(settings_guard);
                     if let Ok(s) = settings_arc.read() {
@@ -201,7 +219,9 @@ pub fn create_tweaks_setup_handler(
             }
 
             tracker.clear("tweaks_setup");
-            tweaks_active.set(false);
+            if let Ok(mut gs) = state.write().write() {
+                gs.set_tweaks_active(&game_id_owned, false);
+            }
         });
     })
 }

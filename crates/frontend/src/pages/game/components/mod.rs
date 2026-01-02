@@ -5,3 +5,4 @@ mod crossfade;
 pub use background::BackgroundLayers;
 pub use buttons::{TopRightButtons, BottomRightButtons};
 pub use crossfade::CrossfadeState;
+pub use super::state::GlobalGameStateSignal;

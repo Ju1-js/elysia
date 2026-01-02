@@ -53,33 +53,30 @@ pub fn MyNetworkImage(
 
     let a11y_id = focus.attribute();
 
-    let image_resource = use_resource(move || {
+    let image_resource = use_resource(use_reactive!(|url| async move {
         let url_value = url.read().clone();
         let cache_path_value = cache_path();
         let cache_key = url_value.to_string();
         
-        async move {
-            let bytes = match cacache::read(&cache_path_value, &cache_key).await {
-                Ok(disk_cache_bytes) => {
-                    Bytes::from(disk_cache_bytes)
-                }
-                Err(_) => {
-                    let fetched_bytes = fetch_image(url_value).await?;
-                    
-                    let cache_path_clone = cache_path_value.clone();
-                    let key_clone = cache_key.clone();
-                    let bytes_clone = fetched_bytes.clone();
-                    tokio::spawn(async move {
-                        let _ = cacache::write(&cache_path_clone, &key_clone, &bytes_clone).await;
-                    });
-                    
-                    fetched_bytes
-                }
-            };
+        let bytes = match cacache::read(&cache_path_value, &cache_key).await {
+            Ok(cached_bytes) => Bytes::from(cached_bytes),
+            Err(_) => {
+                let fetched_bytes = fetch_image(url_value).await?;
+                
+                let cache_path_clone = cache_path_value.clone();
+                let key_clone = cache_key.clone();
+                let bytes_clone = fetched_bytes.clone();
+                
+                tokio::spawn(async move {
+                    let _ = cacache::write(&cache_path_clone, &key_clone, &bytes_clone).await;
+                });
+                
+                fetched_bytes
+            }
+        };
 
-            Ok::<Bytes, String>(bytes)
-        }
-    });
+        Ok::<Bytes, String>(bytes)
+    }));
     
     let url_string = url.read().to_string();
 
@@ -103,7 +100,7 @@ pub fn MyNetworkImage(
                 }
             }
         }
-        Some(Err(_)) => {
+        Some(Err(error)) => {
             if let Some(fallback_element) = fallback {
                 rsx! {{ fallback_element }}
             } else {
@@ -144,9 +141,9 @@ pub fn MyNetworkImage(
 }
 
 pub async fn fetch_image(url: Url) -> Result<Bytes, String> {
-    let response = reqwest::get(url)
+    let response = reqwest::get(url.clone())
         .await
-        .map_err(|err| format!("Failed to fetch image: {err}"))?;
+        .map_err(|err| format!("Failed to fetch image from {}: {}", url, err))?;
 
     let content_type = response
         .headers()
@@ -158,7 +155,7 @@ pub async fn fetch_image(url: Url) -> Result<Bytes, String> {
     let bytes = response
         .bytes()
         .await
-        .map_err(|err| format!("Failed to read image bytes: {err}"))?;
+        .map_err(|err| format!("Failed to read image bytes from {}: {}", url, err))?;
 
     if content_type.contains("webp") {
         transcode_webp_to_png(&bytes)
@@ -167,9 +164,9 @@ pub async fn fetch_image(url: Url) -> Result<Bytes, String> {
     }
 }
 
-fn transcode_webp_to_png(bytes: &[u8]) -> Result<Bytes, String> {
-    let (width, height, rgba_pixels) = WebPDecodeRGBA(bytes)
-        .map_err(|err| format!("Failed to decode WebP image: {err}"))?;
+fn transcode_webp_to_png(webp_bytes: &[u8]) -> Result<Bytes, String> {
+    let (width, height, rgba_pixels) = WebPDecodeRGBA(webp_bytes)
+        .map_err(|err| format!("Failed to decode WebP image: {}", err))?;
 
     let image_info = ImageInfo::new(
         (width as i32, height as i32),
@@ -180,9 +177,10 @@ fn transcode_webp_to_png(bytes: &[u8]) -> Result<Bytes, String> {
 
     let row_bytes = (width as usize)
         .checked_mul(4)
-        .ok_or_else(|| "Image dimensions too large".to_string())?;
+        .ok_or_else(|| format!("Image dimensions too large: {}x{}", width, height))?;
     
     let pixel_data = Data::new_copy(&rgba_pixels);
+    
     let image = skia_safe::images::raster_from_data(&image_info, pixel_data, row_bytes)
         .ok_or_else(|| "Failed to create Skia image from raw data".to_string())?;
 

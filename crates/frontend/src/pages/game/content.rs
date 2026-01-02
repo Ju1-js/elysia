@@ -3,9 +3,10 @@ use freya::prelude::*;
 use reqwest::Url;
 
 use crate::{
-    components::{DownloadControl, MyNewsWidget, ComponentState},
+    components::{DownloadControl, MyNewsWidget},
     context::Context,
 };
+
 use backend::{
     settings::GlobalSettings,
     game_providers::hoyoplay::{get_video_url, get_theme_url},
@@ -17,6 +18,7 @@ use super::components::{BackgroundLayers, TopRightButtons, BottomRightButtons, C
 use super::game_settings::GameSettingsModal;
 use super::handlers;
 use super::helpers;
+use super::state::GlobalGameStateSignal;
 
 #[component]
 pub fn GameContent(
@@ -25,6 +27,7 @@ pub fn GameContent(
     let ctx = use_context::<Context>();
     let settings = use_context::<Signal<Arc<RwLock<GlobalSettings>>>>();
     let mut page_state = use_context::<Signal<GamePageState>>();
+    let game_state = use_context::<GlobalGameStateSignal>();
     
     let video_fade = use_animation(move |_| {
         AnimNum::new(0.0, 1.0).time(700).ease(Ease::InOut).function(Function::Cubic)
@@ -241,29 +244,8 @@ pub fn GameContent(
     let curr_url = bg_curr.peek().clone().unwrap_or(parsed_bg_url.clone());
     let prev_theme = theme_prev.peek().clone();
     let curr_theme = theme_curr.peek().clone();
-    
-    let is_installed = helpers::is_game_installed(&settings, &game_data.id, &game_data.biz);
+
     let system_status = use_context::<Signal<Option<backend::status::SystemStatus>>>();
-    
-    let status = system_status.read();
-    let (runtime_installed, runtime_needs_update, tweaks_installed, tweaks_needs_update) = if let Some(ref status) = *status {
-        (
-            status.runtime_ready(),
-            status.runtime_needs_update(),
-            status.tweaks_ready(),
-            status.tweaks_need_update(),
-        )
-    } else {
-        (false, false, false, false)
-    };
-    
-    let runtime_active = use_signal(|| false);
-    let runtime_ready = use_signal(|| runtime_installed);
-    let runtime_needs_update_signal = use_signal(|| runtime_needs_update);
-    let tweaks_active = use_signal(|| false);
-    let tweaks_ready = use_signal(|| tweaks_installed);
-    let tweaks_needs_update_signal = use_signal(|| tweaks_needs_update);
-    let is_downloading = use_signal(|| false); 
 
     let progress_tracker = use_signal(|| ProgressTracker::new());
     let progress_tracker_instance = progress_tracker();
@@ -279,28 +261,24 @@ pub fn GameContent(
 
     let on_setup_runtime = handlers::create_runtime_setup_handler(
         settings,
-        runtime_active,
-        runtime_ready,
-        runtime_needs_update_signal,
         progress_tracker_instance.clone(),
         system_status,
+        game_state,
     );
 
     let on_setup_tweaks = handlers::create_tweaks_setup_handler(
         settings,
         game_data.id.clone(),
-        tweaks_active,
-        tweaks_ready,
-        tweaks_needs_update_signal,
         progress_tracker_instance.clone(),
         system_status,
+        game_state,
     );
 
     let on_download_game = helpers::create_game_download_handler(
         settings,
         game_data.id.clone(),
         game_data.biz.clone(),
-        is_downloading,
+        game_state,
     );
 
     let settings_scale = if show_settings() {
@@ -404,20 +382,9 @@ pub fn GameContent(
                         rect {
                             key: "download-control-{game_data.id}",
                             DownloadControl {
+                                game_id: game_data.id.clone(),
                                 game_name: game_data.display.name.clone(),
                                 game_progress_key,
-                                installed: is_installed,
-                                runtime: ComponentState {
-                                    ready: runtime_ready,
-                                    needs_update: *runtime_needs_update_signal.read(),
-                                    active: runtime_active,
-                                },
-                                tweaks: ComponentState {
-                                    ready: tweaks_ready,
-                                    needs_update: *tweaks_needs_update_signal.read(),
-                                    active: tweaks_active,
-                                },
-                                download_active: is_downloading,
                                 get_game_progress: get_progress,
                                 get_runtime_progress,
                                 get_tweaks_progress,
@@ -425,6 +392,7 @@ pub fn GameContent(
                                 on_setup_runtime,
                                 on_setup_tweaks,
                                 on_download_game,
+                                game_state,
                             }
                         }
                     }
