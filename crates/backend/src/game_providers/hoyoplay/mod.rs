@@ -8,7 +8,7 @@ use std::{
 };
 
 use md5::Digest;
-use proto::{ApiResponse, Game, GetGameContent, GetGames, GetAllGameBasicInfo, Background};
+use proto::{ApiResponse, Background, Game, GetAllGameBasicInfo, GetGameContent, GetGames};
 use reqwest;
 use serde::{Deserialize, Serialize};
 use tokio::{fs::File, io::AsyncReadExt};
@@ -74,19 +74,21 @@ pub async fn get_game_video_backgrounds(
     game_id: &str,
 ) -> Result<Vec<String>, String> {
     let basic_info = get_all_game_basic_info(settings, Some(game_id)).await?;
-    
+
     let mut video_urls = Vec::new();
     for game_info in basic_info.game_info_list {
         if game_info.game.id == game_id {
             for background in game_info.backgrounds {
-                if background.background_type == "BACKGROUND_TYPE_VIDEO" && !background.video.url.is_empty() {
+                if background.background_type == "BACKGROUND_TYPE_VIDEO"
+                    && !background.video.url.is_empty()
+                {
                     video_urls.push(background.video.url);
                 }
             }
             break;
         }
     }
-    
+
     Ok(video_urls)
 }
 
@@ -202,15 +204,13 @@ where
 }
 
 pub fn get_video_url(backgrounds: &[Background]) -> Option<String> {
-    backgrounds
-        .iter()
-        .find_map(|bg| {
-            if !bg.video.url.is_empty() {
-                Some(bg.video.url.clone())
-            } else {
-                None
-            }
-        })
+    backgrounds.iter().find_map(|bg| {
+        if !bg.video.url.is_empty() {
+            Some(bg.video.url.clone())
+        } else {
+            None
+        }
+    })
 }
 
 pub fn get_theme_url(backgrounds: &[Background]) -> Option<String> {

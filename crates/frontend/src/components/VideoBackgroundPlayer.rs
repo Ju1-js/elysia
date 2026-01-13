@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use dioxus::prelude::*;
 use freya::prelude::*;
 use skia_safe::{
-    images, AlphaType, Canvas, ColorType, Data, FilterMode, ImageInfo, MipmapMode, SamplingOptions,
+    AlphaType, Canvas, ColorType, Data, FilterMode, ImageInfo, MipmapMode, SamplingOptions, images,
 };
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -12,11 +12,19 @@ use tokio_util::sync::CancellationToken;
 use backend::settings::GlobalSettings;
 use ffmpeg_next as ffmpeg;
 
+use crate::{debug, debug_error, debug_info};
+
 #[derive(Clone)]
 struct VideoFrame {
     pixels: Arc<Vec<u8>>,
     width: u32,
     height: u32,
+}
+
+impl VideoFrame {
+    fn memory_size(&self) -> usize {
+        self.pixels.len() + std::mem::size_of::<Self>()
+    }
 }
 
 #[derive(Clone)]
@@ -25,6 +33,7 @@ struct VideoPlayerState {
     cancel_token: CancellationToken,
 }
 
+/// Generate a cache filename based on video URL
 fn generate_cache_filename(url: &str) -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
@@ -43,9 +52,11 @@ async fn get_cached_or_download_video(url: &str, cache_dir: &PathBuf) -> Result<
     let cache_path = videos_cache_dir.join(generate_cache_filename(url));
 
     if cache_path.exists() {
+        debug_info!("Video cache hit for: {}", url);
         return Ok(cache_path);
     }
 
+    debug_info!("Downloading video from: {}", url);
     let temp_path = cache_path.with_extension("tmp");
     let response = reqwest::get(url)
         .await
@@ -54,19 +65,21 @@ async fn get_cached_or_download_video(url: &str, cache_dir: &PathBuf) -> Result<
     let mut file = tokio::fs::File::create(&temp_path)
         .await
         .context("Failed to create temp file")?;
-    
+
     let mut stream = response.bytes_stream();
-    
-    use tokio_stream::StreamExt;
+
     use tokio::io::AsyncWriteExt;
-    
+    use tokio_stream::StreamExt;
+
+    let mut total_bytes = 0;
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.context("Failed to read chunk")?;
+        total_bytes += chunk.len();
         file.write_all(&chunk)
             .await
             .context("Failed to write chunk")?;
     }
-    
+
     file.flush().await.context("Failed to flush file")?;
     drop(file);
 
@@ -74,9 +87,11 @@ async fn get_cached_or_download_video(url: &str, cache_dir: &PathBuf) -> Result<
         .await
         .context("Failed to rename video file to cache")?;
 
+    debug_info!("Video downloaded: {} bytes for {}", total_bytes, url);
     Ok(cache_path)
 }
 
+/// Extract pixel data from a video frame
 fn extract_frame_pixels(frame: &ffmpeg::util::frame::Video) -> VideoFrame {
     let width = frame.width();
     let height = frame.height();
@@ -98,12 +113,13 @@ fn extract_frame_pixels(frame: &ffmpeg::util::frame::Video) -> VideoFrame {
     }
 }
 
+/// Get a valid frame rate from stream or decoder
 fn get_valid_frame_rate(
     stream_fps: ffmpeg::util::rational::Rational,
     decoder_fps: Option<ffmpeg::util::rational::Rational>,
 ) -> ffmpeg::util::rational::Rational {
     let is_valid = |fps: &ffmpeg::util::rational::Rational| fps.0 > 0 && fps.1 > 0;
-    
+
     [Some(stream_fps), decoder_fps]
         .into_iter()
         .flatten()
@@ -119,13 +135,17 @@ async fn decode_and_stream_video(
     cache_dir: PathBuf,
     frame_ready_tx: tokio::sync::mpsc::Sender<()>,
 ) -> Result<()> {
+    debug_info!("Starting video decode for: {}", url);
+    
     if cancel_token.is_cancelled() {
+        debug_info!("Video decode cancelled before start: {}", url);
         return Ok(());
     }
 
     let video_path = get_cached_or_download_video(&url, &cache_dir).await?;
 
     if cancel_token.is_cancelled() {
+        debug_info!("Video decode cancelled after download: {}", url);
         return Ok(());
     }
 
@@ -137,8 +157,8 @@ async fn decode_and_stream_video(
         ffmpeg::init().context("Failed to initialize FFmpeg")?;
         ffmpeg::util::log::set_level(ffmpeg::util::log::Level::Quiet);
 
-        let mut input_context = ffmpeg::format::input(&video_path)
-            .context("Failed to open video file")?;
+        let mut input_context =
+            ffmpeg::format::input(&video_path).context("Failed to open video file")?;
 
         if cancel_token.is_cancelled() {
             return Ok(());
@@ -151,8 +171,9 @@ async fn decode_and_stream_video(
 
         let stream_index = video_stream.index();
         let stream_fps = video_stream.avg_frame_rate();
-        let codec_context = ffmpeg::codec::context::Context::from_parameters(video_stream.parameters())
-            .context("Failed to create codec context")?;
+        let codec_context =
+            ffmpeg::codec::context::Context::from_parameters(video_stream.parameters())
+                .context("Failed to create codec context")?;
         let mut decoder = codec_context
             .decoder()
             .video()
@@ -161,12 +182,15 @@ async fn decode_and_stream_video(
         if cancel_token.is_cancelled() {
             drop(decoder);
             drop(input_context);
+            debug_info!("Video decode cancelled after decoder setup: {}", url);
             return Ok(());
         }
 
         let frame_rate = get_valid_frame_rate(stream_fps, decoder.frame_rate());
         let fps_value = frame_rate.0 as f64 / frame_rate.1 as f64;
         let frame_duration = Duration::from_secs_f64(1.0 / fps_value);
+        
+        debug_info!("Video decoder initialized: {} @ {:.1} FPS", url, fps_value);
 
         if cancel_token.is_cancelled() {
             drop(decoder);
@@ -191,10 +215,12 @@ async fn decode_and_stream_video(
         let mut first_frame_sent = false;
         let mut last_frame_time = Instant::now();
         let mut ready_callback = Some(ready_callback);
+        let mut frame_count = 0;
 
         let result = (|| -> Result<()> {
             loop {
                 if cancel_token.is_cancelled() {
+                    debug_info!("Video decode loop cancelled: {} (processed {} frames)", url, frame_count);
                     return Ok(());
                 }
 
@@ -202,12 +228,13 @@ async fn decode_and_stream_video(
 
                 for (stream, packet) in input_context.packets() {
                     if cancel_token.is_cancelled() {
+                        debug_info!("Video decode loop cancelled during packet: {} (processed {} frames)", url, frame_count);
                         return Ok(());
                     }
 
                     if stream.index() == stream_index {
                         reached_end = false;
-                        
+
                         if let Err(e) = decoder.send_packet(&packet) {
                             if cancel_token.is_cancelled() {
                                 return Ok(());
@@ -217,6 +244,7 @@ async fn decode_and_stream_video(
 
                         while decoder.receive_frame(&mut decoded_frame).is_ok() {
                             if cancel_token.is_cancelled() {
+                                debug_info!("Video decode cancelled during frame decode: {} (processed {} frames)", url, frame_count);
                                 return Ok(());
                             }
 
@@ -230,10 +258,16 @@ async fn decode_and_stream_video(
                                 return Ok(());
                             }
 
+                            // Capture frame info before moving video_frame
+                            let frame_width = video_frame.width;
+                            let frame_height = video_frame.height;
+                            let frame_memory_kb = video_frame.memory_size() / 1024;
+
                             if let Ok(mut frame_guard) = shared_frame.try_lock() {
                                 if !cancel_token.is_cancelled() {
                                     *frame_guard = Some(video_frame);
                                     let _ = frame_ready_tx.try_send(());
+                                    frame_count += 1;
                                 } else {
                                     return Ok(());
                                 }
@@ -242,6 +276,8 @@ async fn decode_and_stream_video(
                             if !first_frame_sent {
                                 if let Some(callback) = ready_callback.take() {
                                     let _ = callback.send(());
+                                    debug_info!("First video frame ready: {} ({}x{}, ~{} KB/frame)", 
+                                        url, frame_width, frame_height, frame_memory_kb);
                                 }
                                 first_frame_sent = true;
                             }
@@ -250,7 +286,7 @@ async fn decode_and_stream_video(
                             if elapsed < frame_duration {
                                 let sleep_duration = frame_duration - elapsed;
                                 let sleep_start = Instant::now();
-                                
+
                                 while sleep_start.elapsed() < sleep_duration {
                                     if cancel_token.is_cancelled() {
                                         return Ok(());
@@ -267,7 +303,8 @@ async fn decode_and_stream_video(
                     if cancel_token.is_cancelled() {
                         return Ok(());
                     }
-                    
+
+                    debug!("Video loop restart: {}", url);
                     input_context
                         .seek(0, ..)
                         .context("Failed to seek to beginning for loop")?;
@@ -275,15 +312,19 @@ async fn decode_and_stream_video(
             }
         })();
 
+        debug_info!("Video decode cleanup starting: {} (total frames: {})", url, frame_count);
+        
         if let Ok(mut guard) = shared_frame.lock() {
             *guard = None;
         }
-        
+
         drop(rgba_frame);
         drop(decoded_frame);
         drop(scaler);
         drop(decoder);
         drop(input_context);
+        
+        debug_info!("Video decode cleanup complete: {}", url);
 
         result
     })
@@ -293,6 +334,7 @@ async fn decode_and_stream_video(
     Ok(())
 }
 
+/// Background video player component with frame rendering
 #[component]
 pub fn VideoBackgroundPlayer(video_url: String, on_ready: EventHandler<()>) -> Element {
     let settings_signal = use_context::<Signal<Arc<std::sync::RwLock<GlobalSettings>>>>();
@@ -304,28 +346,35 @@ pub fn VideoBackgroundPlayer(video_url: String, on_ready: EventHandler<()>) -> E
     // Only recreate state when URL actually changes
     let current_url = video_url.clone();
     if *last_url.read() != current_url {
+        debug_info!("VideoBackgroundPlayer URL change: {} -> {}", last_url.peek(), current_url);
+        
         // Cancel and cleanup old video
         if let Some(ref state) = *player_state.peek() {
+            debug_info!("Cancelling previous video player");
             state.cancel_token.cancel();
-            
+
             if let Ok(mut guard) = state.shared_frame.lock() {
+                if let Some(ref _frame) = *guard {
+                    debug!("Releasing video frame memory: ~{} KB", _frame.memory_size() / 1024);
+                }
                 *guard = None;
             }
         }
-        
+
         // Create new player state
+        debug_info!("Creating new video player state for: {}", current_url);
         player_state.set(Some(VideoPlayerState {
             shared_frame: Arc::new(Mutex::new(None)),
             cancel_token: CancellationToken::new(),
         }));
-        
+
         last_url.set(current_url.clone());
     }
 
     // Start video playback
     use_effect(move || {
         let state_option = player_state.read().clone();
-        
+
         if let Some(state) = state_option {
             let url = video_url.clone();
             let shared_frame = state.shared_frame.clone();
@@ -352,7 +401,7 @@ pub fn VideoBackgroundPlayer(video_url: String, on_ready: EventHandler<()>) -> E
                 let cancel_for_error = cancel_token.clone();
 
                 spawn(async move {
-                    if let Err(err) = decode_and_stream_video(
+                    if let Err(_err) = decode_and_stream_video(
                         url.clone(),
                         shared_frame,
                         cancel_token,
@@ -363,7 +412,7 @@ pub fn VideoBackgroundPlayer(video_url: String, on_ready: EventHandler<()>) -> E
                     .await
                     {
                         if !cancel_for_error.is_cancelled() {
-                            eprintln!("[VIDEO] Playback error: {}", err);
+                            debug_error!("Playback error: {}", _err);
                         }
                     }
                 });
@@ -378,10 +427,15 @@ pub fn VideoBackgroundPlayer(video_url: String, on_ready: EventHandler<()>) -> E
     let (canvas_ref, canvas_size) = use_node_signal();
 
     use_drop(move || {
+        debug_info!("VideoBackgroundPlayer component dropped");
         if let Some(ref state) = *player_state.peek() {
+            debug_info!("Cancelling video on drop");
             state.cancel_token.cancel();
-            
+
             if let Ok(mut guard) = state.shared_frame.lock() {
+                if let Some(ref _frame) = *guard {
+                    debug!("Releasing video frame memory on drop: ~{} KB", _frame.memory_size() / 1024);
+                }
                 *guard = None;
             }
         }
@@ -400,7 +454,12 @@ pub fn VideoBackgroundPlayer(video_url: String, on_ready: EventHandler<()>) -> E
                 if let Ok(frame_guard) = state.shared_frame.try_lock() {
                     if let Some(ref frame) = *frame_guard {
                         if !state.cancel_token.is_cancelled() {
-                            render_video_frame(&canvas_context.canvas, frame, canvas_width, canvas_height);
+                            render_video_frame(
+                                &canvas_context.canvas,
+                                frame,
+                                canvas_width,
+                                canvas_height,
+                            );
                         } else {
                             render_placeholder(&canvas_context.canvas, canvas_width, canvas_height);
                         }
@@ -428,6 +487,7 @@ pub fn VideoBackgroundPlayer(video_url: String, on_ready: EventHandler<()>) -> E
     }
 }
 
+/// Render a video frame onto the canvas
 fn render_video_frame(canvas: &Canvas, frame: &VideoFrame, width: f32, height: f32) {
     let image_info = ImageInfo::new(
         (frame.width as i32, frame.height as i32),
@@ -438,7 +498,9 @@ fn render_video_frame(canvas: &Canvas, frame: &VideoFrame, width: f32, height: f
 
     let pixel_data = Data::new_copy(&frame.pixels);
 
-    if let Some(image) = images::raster_from_data(&image_info, pixel_data, (frame.width * 4) as usize) {
+    if let Some(image) =
+        images::raster_from_data(&image_info, pixel_data, (frame.width * 4) as usize)
+    {
         let destination_rect = skia_safe::Rect::from_xywh(0.0, 0.0, width, height);
         let sampling_options = SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear);
         let mut paint = skia_safe::Paint::default();
@@ -454,6 +516,7 @@ fn render_video_frame(canvas: &Canvas, frame: &VideoFrame, width: f32, height: f
     }
 }
 
+/// Render a placeholder when no video frame is available
 fn render_placeholder(canvas: &Canvas, width: f32, height: f32) {
     let mut paint = skia_safe::Paint::default();
     paint.set_color(skia_safe::Color::from_rgb(20, 20, 20));

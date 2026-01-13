@@ -1,20 +1,18 @@
-use std::sync::{Arc, RwLock};
+use crate::{components::MyAnimatedCarousel, components::MyNetworkImage, context::Context};
+use backend::settings::GlobalSettings;
 use freya::prelude::*;
 use reqwest::Url;
-use backend::settings::GlobalSettings;
-use crate::{
-    components::MyAnimatedCarousel,
-    components::MyNetworkImage,
-    context::Context,
-};
+use std::sync::{Arc, RwLock};
 
+/// News widget displaying a carousel of banners for a game
 #[component]
 pub fn MyNewsWidget(game_id: String) -> Element {
     let ctx = use_context::<Context>();
-    
+    let game_state = use_context::<crate::pages::game::state::GlobalGameStateSignal>();
+
     let mut carousel_index = use_signal(|| 0usize);
     let mut last_interaction = use_signal(|| std::time::Instant::now());
-    
+
     let Some(content) = ctx.api_news.get(&game_id).cloned() else {
         return rsx!({});
     };
@@ -31,11 +29,18 @@ pub fn MyNewsWidget(game_id: String) -> Element {
         carousel_index.set(0);
     }));
 
+    // Auto-scroll carousel, but only when game is not running
     use_effect(move || {
         spawn(async move {
             loop {
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                
+
+                // Check if game is running - pause auto-scroll if it is
+                let game_running = game_state.read().is_game_running();
+                if game_running {
+                    continue; // Skip auto-scroll when game is running
+                }
+
                 let elapsed = last_interaction().elapsed();
                 if elapsed >= std::time::Duration::from_secs(4) {
                     let current = carousel_index();
@@ -53,19 +58,19 @@ pub fn MyNewsWidget(game_id: String) -> Element {
             main_align: "start",
             spacing: "12",
             width: "100%",
-            
+
             rect {
                 direction: "vertical",
                 width: "100%",
                 spacing: "8",
-                
+
                 rect {
                     direction: "horizontal",
                     spacing: "0",
                     padding: "0",
                     corner_radius: "16",
                     overflow: "clip",
-                    
+
                     MyAnimatedCarousel {
                         key: "{game_id}",
                         items: content.banners.iter().map(|banner| {
@@ -83,21 +88,21 @@ pub fn MyNewsWidget(game_id: String) -> Element {
                         }
                     }
                 }
-                
+
                 rect {
                     width: "100%",
                     height: "28",
                     direction: "horizontal",
                     main_align: "center",
                     cross_align: "center",
-                    
+
                     rect {
                         direction: "horizontal",
                         spacing: "7",
                         padding: "6 14",
                         background: "rgb(0, 0, 0, 0.7)",
                         corner_radius: "16",
-                        
+
                         for i in 0..banner_count {
                             rect {
                                 key: "{i}",

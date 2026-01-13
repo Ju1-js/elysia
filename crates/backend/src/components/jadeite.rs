@@ -1,12 +1,12 @@
-use anyhow::Result;
-use reqwest::Url;
 use crate::components::ComponentVersion;
+use anyhow::Result;
 use common::git;
+use reqwest::Url;
 
 pub async fn fetch_versions() -> Result<Vec<ComponentVersion>> {
     let repo = "mkrsym1/jadeite";
     let releases = git::codeberg_releases(repo).await?;
-    
+
     let versions = releases
         .into_iter()
         .filter_map(|rel| {
@@ -17,10 +17,11 @@ pub async fn fetch_versions() -> Result<Vec<ComponentVersion>> {
                     Some(ComponentVersion {
                         version: rel.tag_name.clone(),
                         download_url: Url::parse(&asset.browser_download_url).ok()?,
+                        display_name: rel.tag_name.clone(),
                     })
                 })
         })
         .collect();
-    
+
     Ok(versions)
 }

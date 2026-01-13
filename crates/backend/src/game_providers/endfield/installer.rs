@@ -1,12 +1,9 @@
-use serde_json::json;
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::{RwLock, Weak};
-use async_trait::async_trait;
-use crate::settings::{InstalledGame, GlobalSettings};
-use crate::runners::{Runners, Proton};
-use crate::game_providers::installer::GameInstaller;
 use crate::game_providers::Progress;
+use crate::game_providers::installer::GameInstaller;
+use crate::settings::InstalledGame;
+use async_trait::async_trait;
+use serde_json::json;
+use std::path::PathBuf;
 
 pub struct EndfieldInstaller {
     pub appcode: String,
@@ -17,12 +14,7 @@ pub struct EndfieldInstaller {
 }
 
 impl EndfieldInstaller {
-    pub fn new(
-        game_id: String,
-        temp_dir: PathBuf,
-        games_dir: PathBuf,
-        biz_name: String,
-    ) -> Self {
+    pub fn new(game_id: String, temp_dir: PathBuf, games_dir: PathBuf, biz_name: String) -> Self {
         Self {
             appcode: game_id.clone(),
             game_id,
@@ -84,9 +76,12 @@ impl GameInstaller for EndfieldInstaller {
         let temp_dir = self.temp_dir.clone();
 
         let dest = tokio::task::spawn_blocking(move || {
-            tokio::runtime::Handle::current().block_on(
-                super::install_from_batch_body_value(v, &appcode, games_dir.as_path(), temp_dir.as_path())
-            )
+            tokio::runtime::Handle::current().block_on(super::install_from_batch_body_value(
+                v,
+                &appcode,
+                games_dir.as_path(),
+                temp_dir.as_path(),
+            ))
         })
         .await
         .map_err(|e| format!("Task error: {}", e))?
@@ -98,15 +93,9 @@ impl GameInstaller for EndfieldInstaller {
         Ok(InstalledGame {
             id: self.game_id.clone(),
             biz_name: self.biz_name.clone(),
-            command_arguments: None,
-            command_wrapper: None,
-            environment: HashMap::new(),
             executable_path: dest.join("EndfieldTBeta2.exe"),
             install_path: dest,
-            runner: Runners::Proton(Proton {
-                version: "GE-Proton".to_string(),
-            }),
-            runtime_components: Vec::new(),
+            ..Default::default()
         })
     }
 }

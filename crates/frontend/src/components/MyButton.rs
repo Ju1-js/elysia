@@ -8,19 +8,20 @@ pub struct MyButtonProps {
     pub enabled: bool,
 }
 
+/// Custom button component with hover effects and accessibility support
 #[component]
 pub fn MyButton(props: MyButtonProps) -> Element {
     let mut focus = use_focus();
     let mut status = use_signal(ButtonStatus::default);
     let platform = use_platform();
     let a11y_id = focus.attribute();
-    
+
     let MyButtonProps {
         children,
         onpress,
         enabled,
     } = props;
-    
+
     let ButtonTheme {
         background: _,
         hover_background: _,
@@ -35,7 +36,7 @@ pub fn MyButton(props: MyButtonProps) -> Element {
         font_theme,
         shadow: _,
     } = use_applied_theme!(&None, filled_button);
-    
+
     let onpointerpress = {
         to_owned![onpress];
         move |ev: PointerEvent| {
@@ -57,31 +58,31 @@ pub fn MyButton(props: MyButtonProps) -> Element {
             }
         }
     };
-    
+
     use_effect(use_reactive!(|enabled| {
         if *status.peek() == ButtonStatus::Hovering && !enabled {
             platform.set_cursor(CursorIcon::default());
         }
     }));
-    
+
     use_drop(move || {
         if *status.read() == ButtonStatus::Hovering && enabled {
             platform.set_cursor(CursorIcon::default());
         }
     });
-    
+
     let onpointerenter = move |_| {
         if enabled {
             platform.set_cursor(CursorIcon::Pointer);
             status.set(ButtonStatus::Hovering);
         }
     };
-    
+
     let onpointerleave = move |_| {
         platform.set_cursor(CursorIcon::default());
         status.set(ButtonStatus::default());
     };
-    
+
     let onkeydown = move |ev: KeyboardEvent| {
         if focus.validate_keydown(&ev)
             && enabled
@@ -90,11 +91,11 @@ pub fn MyButton(props: MyButtonProps) -> Element {
             onpress.call(PressEvent::Key(ev))
         }
     };
-    
+
     let a11y_focusable = if enabled { "true" } else { "false" };
-    
+
     let is_hovering = *status.read() == ButtonStatus::Hovering && enabled;
-    
+
     let border = if focus.is_focused_with_keyboard() {
         format!("2 inner {focus_border_fill}")
     } else if is_hovering {
@@ -108,13 +109,9 @@ pub fn MyButton(props: MyButtonProps) -> Element {
     } else {
         "0 4 16 0 rgb(0, 0, 0, 80), 0 2 6 0 rgb(0, 0, 0, 50)"
     };
-    
-    let background_opacity = if is_hovering {
-        "0.8"
-    } else {
-        "0.6"
-    };
-    
+
+    let background_opacity = if is_hovering { "0.8" } else { "0.6" };
+
     rsx! {
         rect {
             onpointerpress,

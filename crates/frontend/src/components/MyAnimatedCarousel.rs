@@ -9,11 +9,16 @@ pub struct MyAnimatedCarouselProps {
     pub on_manual_change: Option<EventHandler<()>>,
 }
 
+/// Animated carousel component with swipe animations
 #[component]
 pub fn MyAnimatedCarousel(props: MyAnimatedCarouselProps) -> Element {
-    let MyAnimatedCarouselProps { items, selected, on_manual_change } = props;
+    let MyAnimatedCarouselProps {
+        items,
+        selected,
+        on_manual_change,
+    } = props;
     let (reference, node_size) = use_node_signal();
-    
+
     let mut state = use_signal(|| {
         let initial_index = selected.as_ref().map(|s| s()).unwrap_or(0);
         CarouselState::Stopped(initial_index)
@@ -142,7 +147,7 @@ fn Carousel(
                                 rect {
                                     width: "100%",
                                     position: "relative",
-                                    
+
                                     rect {
                                         width: "100%",
                                         position: "absolute",
@@ -151,7 +156,7 @@ fn Carousel(
                                         opacity: "{1.0 - opacity}",
                                         {&items[to]}
                                     }
-                                    
+
                                     rect {
                                         width: "100%",
                                         position: "absolute",
@@ -160,7 +165,7 @@ fn Carousel(
                                         opacity: "{opacity}",
                                         {&items[from]}
                                     }
-                                    
+
                                     rect {
                                         width: "100%",
                                         opacity: "0",

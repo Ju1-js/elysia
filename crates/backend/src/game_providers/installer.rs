@@ -1,10 +1,13 @@
-use std::{path::{Path, PathBuf}, sync::{Arc, RwLock}};
+use std::{
+    path::{Path, PathBuf},
+    sync::{Arc, RwLock},
+};
 
 use crate::game_providers::Progress;
 use serde::{Deserialize, Serialize};
 
-use async_trait::async_trait;
 use crate::settings::{GlobalSettings, InstalledGame};
+use async_trait::async_trait;
 
 #[async_trait]
 pub trait GameInstaller: Send + Sync {
@@ -17,7 +20,7 @@ pub trait GameInstaller: Send + Sync {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct InstallationManifest {
-    pub game_id: String
+    pub game_id: String,
 }
 
 pub struct InstallerManager;
@@ -29,14 +32,15 @@ impl InstallerManager {
         temp_dir: PathBuf,
         components_dir: PathBuf,
     ) -> Option<Box<dyn GameInstaller>> {
-        let games_dir = components_dir.parent()
+        let games_dir = components_dir
+            .parent()
             .unwrap_or(components_dir.as_path())
             .join("games");
-        
+
         match biz {
             "endfield" => {
                 use crate::game_providers::endfield::EndfieldInstaller;
-                
+
                 Some(Box::new(EndfieldInstaller::new(
                     game_id.to_string(),
                     temp_dir,
@@ -48,20 +52,26 @@ impl InstallerManager {
         }
     }
 
-    pub fn spawn_install(settings: Arc<RwLock<GlobalSettings>>, installer: Box<dyn GameInstaller>, game_id: String) {
+    pub fn spawn_install(
+        settings: Arc<RwLock<GlobalSettings>>,
+        installer: Box<dyn GameInstaller>,
+        game_id: String,
+    ) {
         tokio::spawn(async move {
-        match installer.install().await {
-            Ok(installed_game) => {
-                let settings = settings.write();
-                if let Ok(mut settings) = settings
-                    && let Err(e) = Self::persist_installation(&mut settings, game_id, installed_game) {
+            match installer.install().await {
+                Ok(installed_game) => {
+                    let settings = settings.write();
+                    if let Ok(mut settings) = settings
+                        && let Err(e) =
+                            Self::persist_installation(&mut settings, game_id, installed_game)
+                    {
                         eprintln!("Failed to persist installation: {}", e);
                     }
+                }
+                Err(e) => {
+                    eprintln!("Failed to install game: {}", e);
+                }
             }
-            Err(e) => {
-                eprintln!("Failed to install game: {}", e);
-            }
-        }
         });
     }
 
@@ -86,25 +96,31 @@ impl InstallerManager {
 
     fn check_marker_file(install_dir: &Path, game_id: &str) -> bool {
         let marker_path = install_dir.join(".elysia_installed");
-        
+
         if !marker_path.exists() {
             return false;
         }
-        
+
         if let Ok(data) = std::fs::read_to_string(&marker_path)
-            && let Ok(manifest) = serde_json::from_str::<InstallationManifest>(&data) {
-                return manifest.game_id == game_id;
-            }
-        
+            && let Ok(manifest) = serde_json::from_str::<InstallationManifest>(&data)
+        {
+            return manifest.game_id == game_id;
+        }
+
         false
     }
 
-    pub fn persist_installation(settings: &mut GlobalSettings, game_id: String, installed_game: InstalledGame) -> Result<(), String> {
+    pub fn persist_installation(
+        settings: &mut GlobalSettings,
+        game_id: String,
+        installed_game: InstalledGame,
+    ) -> Result<(), String> {
         settings.installed_games.insert(game_id, installed_game);
-        
-        settings.save()
+
+        settings
+            .save()
             .map_err(|e| format!("Failed to save settings: {}", e))?;
-        
+
         Ok(())
     }
 }

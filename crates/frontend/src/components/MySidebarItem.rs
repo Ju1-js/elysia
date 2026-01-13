@@ -1,6 +1,7 @@
 use freya::prelude::*;
 
 #[allow(non_snake_case)]
+/// Sidebar item component with hover effects
 #[component]
 pub fn MySidebarItem(
     /// Inner content for the SidebarItem.

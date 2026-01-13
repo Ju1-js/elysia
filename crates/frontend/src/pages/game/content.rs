@@ -1,95 +1,153 @@
-use std::sync::{Arc, RwLock};
 use freya::prelude::*;
 use reqwest::Url;
+use std::sync::{Arc, RwLock};
 
 use crate::{
     components::{DownloadControl, MyNewsWidget},
     context::Context,
+    theme,
+    debug_info,
 };
 
-use backend::{
-    settings::GlobalSettings,
-    game_providers::hoyoplay::{get_video_url, get_theme_url},
-    progress::ProgressTracker,
-    components::tweaks::TweakManifest,
-};
 use crate::layout::GamePageState;
+use crate::pages::game_settings_modal::GameSettingsModal;
+use super::video_state::VideoState;
+use backend::{
+    components::tweaks::TweakManifest,
+    game_providers::hoyoplay::{get_theme_url, get_video_url},
+    progress::ProgressTracker,
+    settings::GlobalSettings,
+};
 
-use super::components::{BackgroundLayers, TopRightButtons, BottomRightButtons, CrossfadeState};
-use super::game_settings::GameSettingsModal;
+use super::animations::{create_fade_animation, create_scale_animation};
+use super::components::{BackgroundLayers, BottomRightButtons, CrossfadeState, TopRightButtons};
 use super::handlers;
 use super::helpers;
-use super::state::GlobalGameStateSignal;
+use super::state::{GlobalGameStateSignal, RunnerType};
 
+/// Updates component readiness state based on the current runner type.
+///
+/// This helper function consolidates the logic for checking which runtime components
+/// are installed and updating the game state accordingly. It checks:
+/// - For Wine runners: Wine and DXVK installation
+/// - For Proton runners: Proton, UMU launcher, and Steam Runtime installation
+/// - For all runners: Jadeite (tweaks) installation
+///
+/// # Arguments
+/// * `game_state` - Mutable reference to the global game state signal
+/// * `runner_type` - The type of runner (Wine or Proton) to check components for
+/// * `game_id` - The game ID to associate tweaks readiness with
+/// * `component_svc` - The component service for checking installation status
+/// * `settings_guard` - Global settings containing installation paths
+fn update_component_readiness(
+    game_state: &mut GlobalGameStateSignal,
+    runner_type: &RunnerType,
+    game_id: &str,
+    component_svc: &crate::services::ComponentService,
+    settings_guard: &GlobalSettings,
+) {
+    match runner_type {
+        RunnerType::Wine => {
+            let wine_installed = component_svc.is_installed(
+                settings_guard,
+                backend::components::ComponentType::Wine,
+            );
+            let dxvk_installed = component_svc.is_installed(
+                settings_guard,
+                backend::components::ComponentType::Dxvk,
+            );
+            game_state.write().set_wine_ready(wine_installed);
+            game_state.write().set_dxvk_ready(dxvk_installed);
+            game_state.write().set_proton_ready(false);
+        }
+        RunnerType::Proton => {
+            // Proton requires Proton itself, UMU launcher, and Steam Runtime
+            let proton_installed = component_svc.is_installed(
+                settings_guard,
+                backend::components::ComponentType::Proton,
+            );
+            let umu_installed = component_svc.is_installed(
+                settings_guard,
+                backend::components::ComponentType::Umu,
+            );
+            let steamrt_installed = component_svc.is_installed(
+                settings_guard,
+                backend::components::ComponentType::SteamRuntime,
+            );
+            let all_ready = proton_installed && umu_installed && steamrt_installed;
+            game_state.write().set_proton_ready(all_ready);
+            game_state.write().set_wine_ready(false);
+            game_state.write().set_dxvk_ready(false);
+        }
+    }
+
+    // Check if Jadeite (tweaks) is installed
+    let jadeite_installed = component_svc.is_installed(
+        settings_guard,
+        backend::components::ComponentType::Jadeite,
+    );
+    game_state.write().set_tweaks_ready(game_id, jadeite_installed);
+}
+
+/// Game content page displaying game information and actions
 #[component]
-pub fn GameContent(
-    selected_game_id: Signal<Option<String>>,
-) -> Element {
+pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
     let ctx = use_context::<Context>();
     let settings = use_context::<Signal<Arc<RwLock<GlobalSettings>>>>();
     let mut page_state = use_context::<Signal<GamePageState>>();
-    let game_state = use_context::<GlobalGameStateSignal>();
+    let mut game_state = use_context::<GlobalGameStateSignal>();
+    let mut video_state = use_context::<Signal<VideoState>>();
     let tweak_manifest = use_signal(|| TweakManifest::new());
-    
-    let video_fade = use_animation(move |_| {
-        AnimNum::new(0.0, 1.0).time(700).ease(Ease::InOut).function(Function::Cubic)
-    });
-    
+
+    let video_fade = use_animation(create_fade_animation());
+
     let mut video_ready = use_signal(|| false);
     let mut video_loaded = use_signal(|| false);
     let mut show_settings = use_signal(|| false);
-    
-    let settings_scale_anim = use_animation(move |_| {
-        AnimNum::new(0.92, 1.0).time(200).ease(Ease::Out).function(Function::Cubic)
-    });
-    
+
+    let settings_scale_anim = use_animation(create_scale_animation());
+
     let mut bg_prev = use_signal(|| Option::<Url>::None);
     let mut bg_curr = use_signal(|| Option::<Url>::None);
-    let bg_fade = use_animation(move |_| {
-        AnimNum::new(0.0, 1.0).time(700).ease(Ease::InOut).function(Function::Cubic)
-    });
-    
+    let bg_fade = use_animation(create_fade_animation());
+
     let mut theme_prev = use_signal(|| Option::<String>::None);
     let mut theme_curr = use_signal(|| Option::<String>::None);
-    let theme_fade = use_animation(move |_| {
-        AnimNum::new(0.0, 1.0).time(700).ease(Ease::InOut).function(Function::Cubic)
-    });
-    
+    let theme_fade = use_animation(create_fade_animation());
+
     let mut news_prev_game = use_signal(|| Option::<String>::None);
     let mut news_curr_game = use_signal(|| Option::<String>::None);
     let mut news_initial_load = use_signal(|| true);
-    let news_fade = use_animation(move |_| {
-        AnimNum::new(0.0, 1.0).time(700).ease(Ease::InOut).function(Function::Cubic)
-    });
-    
+    let news_fade = use_animation(create_fade_animation());
+
     let game_id = selected_game_id.read();
     let Some(ref game_id_str) = *game_id else {
-        return rsx! { 
-            rect { 
-                width: "fill", 
-                height: "fill",
-                main_align: "center",
-                cross_align: "center",
-                label { 
-                    font_size: "20",
-                    color: "rgb(150, 150, 150)",
-                    "No game selected" 
-                }
-            } 
-        };
-    };
-
-    let Some(game_data) = ctx.api_games.iter().find(|g| &g.id == game_id_str).cloned() else {
-        return rsx! { 
-            rect { 
+        return rsx! {
+            rect {
                 width: "fill",
                 height: "fill",
                 main_align: "center",
                 cross_align: "center",
-                label { 
+                label {
+                    font_size: "20",
+                    color: "rgb(150, 150, 150)",
+                    "No game selected"
+                }
+            }
+        };
+    };
+
+    let Some(game_data) = ctx.api_games.iter().find(|g| &g.id == game_id_str).cloned() else {
+        return rsx! {
+            rect {
+                width: "fill",
+                height: "fill",
+                main_align: "center",
+                cross_align: "center",
+                label {
                     font_size: "20",
                     color: "rgb(200, 100, 100)",
-                    "Game not found" 
+                    "Game not found"
                 }
             }
         };
@@ -102,20 +160,28 @@ pub fn GameContent(
                 height: "fill",
                 main_align: "center",
                 cross_align: "center",
-                label { 
+                label {
                     font_size: "20",
                     color: "rgb(200, 100, 100)",
-                    "Invalid background URL" 
+                    "Invalid background URL"
                 }
             }
         };
     };
 
-    let (video_url, _theme_url) = ctx.api_game_basic_info
+    // Check if videos are disabled in settings
+    let videos_disabled = settings.read().read().ok().map(|s| s.disable_videos).unwrap_or(false);
+
+    let (video_url, _theme_url) = ctx
+        .api_game_basic_info
         .iter()
         .find(|info| info.game.id == game_data.id)
         .map(|info| {
-            let video = get_video_url(&info.backgrounds);
+            let video = if videos_disabled {
+                None // Disable videos if setting is enabled
+            } else {
+                get_video_url(&info.backgrounds)
+            };
             let theme = get_theme_url(&info.backgrounds);
             (video, theme)
         })
@@ -124,45 +190,31 @@ pub fn GameContent(
     let current_game_id = selected_game_id.read().clone();
     use_effect(use_reactive!(|current_game_id| {
         let stored_prev = page_state.peek().prev_game_id.clone();
-        
+
         if stored_prev.as_ref() != current_game_id.as_ref() {
+            debug_info!("Game switch detected: {:?} -> {:?}", stored_prev, current_game_id);
+            
             page_state.write().prev_game_id = current_game_id.clone();
             *video_ready.write() = false;
             *video_loaded.write() = false;
             *show_settings.write() = false;
         }
     }));
-        
+
     let bg_url_str = parsed_bg_url.to_string();
-    let game_id_for_bg = game_data.id.clone();
-    let api_info_bg = ctx.api_game_basic_info.clone();
-    use_effect(use_reactive!(|bg_url_str, game_id_for_bg| {
-        let video_url = api_info_bg
-            .iter()
-            .find(|info| info.game.id == game_id_for_bg)
-            .and_then(|info| get_video_url(&info.backgrounds));
-        
+    use_effect(use_reactive!(|bg_url_str| {
         let curr = bg_curr.peek().as_ref().map(|u| u.to_string());
 
-        if curr.is_none() {
-            if let Ok(url) = bg_url_str.parse::<Url>() {
-                bg_prev.set(Some(url.clone()));
-                bg_curr.set(Some(url));
-            }
-            return;
-        }
-
         if curr.as_ref() != Some(&bg_url_str) {
-            let is_transitioning_to_video = video_url.is_some() && !video_loaded();
+            debug_info!("Background URL updating to: {}", bg_url_str);
             
-            if !is_transitioning_to_video {
+            if curr.is_some() {
                 bg_prev.set(bg_curr.peek().clone());
-                if let Ok(new_url) = bg_url_str.parse::<Url>() {
-                    bg_curr.set(Some(new_url));
-                }
-                if video_url.is_none() {
-                    bg_fade.start();
-                }
+            }
+            
+            if let Ok(new_url) = bg_url_str.parse::<Url>() {
+                bg_curr.set(Some(new_url));
+                bg_fade.start();
             }
         }
     }));
@@ -174,15 +226,15 @@ pub fn GameContent(
             .iter()
             .find(|info| info.game.id == game_id_for_theme)
             .and_then(|info| get_theme_url(&info.backgrounds));
-        
+
         let curr = theme_curr.peek().clone();
-        
+
         if curr.is_none() && theme_prev.peek().is_none() {
             theme_prev.set(theme_url_str.clone());
             theme_curr.set(theme_url_str.clone());
             return;
         }
-        
+
         if curr != theme_url_str {
             theme_prev.set(curr);
             theme_curr.set(theme_url_str.clone());
@@ -193,14 +245,14 @@ pub fn GameContent(
     let current_game_id_for_news = game_data.id.clone();
     use_effect(use_reactive!(|current_game_id_for_news| {
         let curr = news_curr_game.peek().clone();
-        
+
         if curr.is_none() && news_prev_game.peek().is_none() {
             news_curr_game.set(Some(current_game_id_for_news.clone()));
             news_fade.start();
             news_initial_load.set(false);
             return;
         }
-        
+
         if curr.as_ref() != Some(&current_game_id_for_news) {
             news_prev_game.set(curr);
             news_curr_game.set(Some(current_game_id_for_news.clone()));
@@ -229,19 +281,19 @@ pub fn GameContent(
     } else {
         1.0
     };
-    
+
     let theme_fade_progress = if theme_fade.is_running() {
         theme_fade.get().read().read() as f64
     } else {
         1.0
     };
-    
+
     let news_fade_progress = if news_fade.is_running() {
         news_fade.get().read().read() as f64
     } else {
         1.0
     };
-    
+
     let prev_url = bg_prev.peek().clone().unwrap_or(parsed_bg_url.clone());
     let curr_url = bg_curr.peek().clone().unwrap_or(parsed_bg_url.clone());
     let prev_theme = theme_prev.peek().clone();
@@ -252,36 +304,107 @@ pub fn GameContent(
     let progress_tracker = use_signal(|| ProgressTracker::new());
     let progress_tracker_instance = progress_tracker();
 
-    let (game_progress_key, get_progress) = helpers::create_progress_getter(
-        settings,
-        game_data.id.clone(),
-        game_data.biz.clone()
-    );
+    let (game_progress_key, get_progress) =
+        helpers::create_progress_getter(settings, game_data.id.clone(), game_data.biz.clone());
 
-    let get_runtime_progress = handlers::create_runtime_progress_getter(progress_tracker_instance.clone());
-    let get_tweaks_progress = handlers::create_tweaks_progress_getter(progress_tracker_instance.clone());
+    let get_runtime_progress =
+        handlers::create_runtime_progress_getter(progress_tracker_instance.clone());
+    let get_tweaks_progress =
+        handlers::create_tweaks_progress_getter(progress_tracker_instance.clone());
 
-    let on_setup_runtime = handlers::create_runtime_setup_handler(
-        settings,
-        progress_tracker_instance.clone(),
-        system_status,
-        game_state,
-    );
+    let component_service = use_context::<Signal<Option<crate::services::ComponentService>>>();
 
-    let on_setup_tweaks = handlers::create_tweaks_setup_handler(
-        settings,
-        game_data.id.clone(),
-        progress_tracker_instance.clone(),
-        system_status,
-        game_state,
-    );
+    // Sync game state with current game's runner configuration when game changes or settings update
+    let game_id_for_state = game_data.id.clone();
+    let settings_watcher = settings.clone();
+    use_effect(use_reactive!(|game_id_for_state, settings_watcher| {
+        let settings_arc = settings_watcher.read().clone();
+        if let Ok(settings_guard) = settings_arc.read() {
+            // Check component service availability
+            let component_svc = component_service.read().clone();
 
-    let on_download_game = helpers::create_game_download_handler(
-        settings,
-        game_data.id.clone(),
-        game_data.biz.clone(),
-        game_state,
-    );
+            // Check if game is installed and update download state
+            let is_game_installed = settings_guard.installed_games.contains_key(&game_id_for_state);
+            game_state.write().set_download_installed(&game_id_for_state, is_game_installed);
+
+            // Determine runner type from game settings, preferences, or defaults
+            let runner_type = if let Some(game) = settings_guard.installed_games.get(&game_id_for_state) {
+                // Game is installed - use its runner
+                match &game.runner {
+                    backend::runners::Runners::Native => RunnerType::Proton,
+                    backend::runners::Runners::Wine(_) => RunnerType::Wine,
+                    backend::runners::Runners::Proton(_) => RunnerType::Proton,
+                }
+            } else if let Some(prefs) = settings_guard.game_preferences.get(&game_id_for_state) {
+                // Game has preferences - use those
+                match &prefs.runner {
+                    backend::runners::Runners::Native => RunnerType::Proton,
+                    backend::runners::Runners::Wine(_) => RunnerType::Wine,
+                    backend::runners::Runners::Proton(_) => RunnerType::Proton,
+                }
+            } else {
+                // No game-specific settings - use defaults
+                match &settings_guard.default_preferences.runner {
+                    backend::runners::Runners::Native => RunnerType::Proton,
+                    backend::runners::Runners::Wine(_) => RunnerType::Wine,
+                    backend::runners::Runners::Proton(_) => RunnerType::Proton,
+                }
+            };
+
+            // Update component readiness based on runner type
+            if let Some(ref svc) = component_svc {
+                update_component_readiness(
+                    &mut game_state,
+                    &runner_type,
+                    &game_id_for_state,
+                    svc,
+                    &settings_guard,
+                );
+            }
+
+            // Update the runner type in state
+            game_state.write().set_runner_type(runner_type);
+        }
+    }));
+
+    // Clone values needed by multiple memoized closures
+    let progress_tracker_for_runtime = progress_tracker_instance.clone();
+    let progress_tracker_for_tweaks = progress_tracker_instance.clone();
+    let game_id_for_tweaks = game_data.id.clone();
+    let game_id_for_download = game_data.id.clone();
+    let game_biz_for_download = game_data.biz.clone();
+
+    let on_setup_runtime = use_memo(move || {
+        handlers::create_component_setup_handler(
+            settings,
+            progress_tracker_for_runtime.clone(),
+            system_status,
+            game_state,
+            component_service,
+        )
+    });
+
+    let on_setup_tweaks = use_memo(move || {
+        handlers::create_tweaks_setup_handler(
+            settings,
+            game_id_for_tweaks.clone(),
+            progress_tracker_for_tweaks.clone(),
+            system_status,
+            game_state,
+            component_service,
+        )
+    });
+
+    // Create game download handler
+    let on_download_game = use_memo(use_reactive!(|game_id_for_download, game_biz_for_download| {
+        helpers::create_game_download_handler(
+            settings,
+            game_id_for_download.clone(),
+            game_biz_for_download.clone(),
+            game_state,
+            video_state,
+        )
+    }));
 
     // fixme: not only jadeite
     let game_needs_tweaks = tweak_manifest.read().needs_jadeite(&game_data.id);
@@ -303,6 +426,7 @@ pub fn GameContent(
             height: "fill",
 
             BackgroundLayers {
+                key: "bg-layers-{game_id_str}",
                 crossfade: CrossfadeState {
                     prev_url,
                     curr_url,
@@ -325,10 +449,10 @@ pub fn GameContent(
                 width: "100%",
                 height: "100%",
                 layer: "-1",
-                
+
                 if !*show_settings.read() {
                     TopRightButtons {}
-                    
+
                     BottomRightButtons {
                         on_settings: move |_| {
                             show_settings.set(true);
@@ -336,7 +460,7 @@ pub fn GameContent(
                         },
                     }
                 }
-                
+
                 if !*show_settings.read() {
                     rect {
                         position: "absolute",
@@ -349,12 +473,12 @@ pub fn GameContent(
                         cross_align: "start",
                         padding: "60",
                         spacing: "16",
-                        
+
                         rect {
                             key: "news-widget-container",
                             width: "350",
                             height: "200",
-                            
+
                             if let Some(prev_game) = news_prev_game.peek().clone() {
                                 rect {
                                     key: "news-widget-prev-{prev_game}",
@@ -366,7 +490,7 @@ pub fn GameContent(
                                     }
                                 }
                             }
-                            
+
                             if let Some(curr_game) = news_curr_game.peek().clone() {
                                 rect {
                                     key: "news-widget-curr-{curr_game}",
@@ -379,7 +503,7 @@ pub fn GameContent(
                                 }
                             }
                         }
-                        
+
                         rect {
                             key: "download-control-{game_data.id}",
                             DownloadControl {
@@ -389,10 +513,10 @@ pub fn GameContent(
                                 get_game_progress: get_progress,
                                 get_runtime_progress,
                                 get_tweaks_progress,
-                                accent_color: "#ff9500".to_string(),
-                                on_setup_runtime,
-                                on_setup_tweaks,
-                                on_download_game,
+                                accent_color: theme::ACCENT_PRIMARY.to_string(),
+                                on_setup_runtime: *on_setup_runtime.read(),
+                                on_setup_tweaks: *on_setup_tweaks.read(),
+                                on_download_game: *on_download_game.read(),
                                 game_state,
                                 game_needs_tweaks,
                             }
@@ -400,7 +524,7 @@ pub fn GameContent(
                     }
                 }
             }
-            
+
             if *show_settings.read() {
                 rect {
                     key: "settings-modal-overlay",
@@ -410,7 +534,7 @@ pub fn GameContent(
                     width: "100%",
                     height: "100%",
                     layer: "1",
-                    
+
                     GameSettingsModal {
                         on_close: move |_| show_settings.set(false),
                         game_name: game_data.display.name.clone(),

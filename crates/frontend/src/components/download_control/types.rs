@@ -1,10 +1,10 @@
-use freya::prelude::*;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct DownloadProgress {
     pub downloaded: u64,
     pub total: u64,
-    pub speed_mb_s: f32,
+    pub speed_mb_s: f64,
     pub status: String,
     pub is_busy: bool,
 }
@@ -12,20 +12,26 @@ pub struct DownloadProgress {
 #[derive(Clone, Debug, PartialEq)]
 pub enum SetupStep {
     CheckDependencies,
-    DownloadUmu,
+    DownloadWine,
     DownloadDxvk,
-    DownloadJadeite,
+    DownloadUmu,
     DownloadSteamRuntime,
+    DownloadProton,
+    DownloadJadeite,
+    Complete,
 }
 
 impl SetupStep {
-    pub fn description(&self) -> &str {
+    pub fn description(&self) -> &'static str {
         match self {
             SetupStep::CheckDependencies => "Checking dependencies",
-            SetupStep::DownloadUmu => "Downloading UMU launcher",
+            SetupStep::DownloadWine => "Downloading Wine",
             SetupStep::DownloadDxvk => "Downloading DXVK",
-            SetupStep::DownloadJadeite => "Downloading Jadeite",
+            SetupStep::DownloadUmu => "Downloading UMU Launcher",
             SetupStep::DownloadSteamRuntime => "Downloading Steam Runtime",
+            SetupStep::DownloadProton => "Downloading Proton",
+            SetupStep::DownloadJadeite => "Downloading Jadeite",
+            SetupStep::Complete => "Setup complete",
         }
     }
 }

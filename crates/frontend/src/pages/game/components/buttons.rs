@@ -1,5 +1,5 @@
-use freya::prelude::*;
 use crate::components::MyButton;
+use freya::prelude::*;
 
 #[component]
 pub fn TopRightButtons() -> Element {
@@ -13,7 +13,7 @@ pub fn TopRightButtons() -> Element {
             direction: "horizontal",
             main_align: "end",
             padding: "0 32",
-            
+
             MyButton {
                 onpress: move |_| println!("Meow clicked!"),
                 label {
@@ -28,9 +28,7 @@ pub fn TopRightButtons() -> Element {
 }
 
 #[component]
-pub fn BottomRightButtons(
-    on_settings: EventHandler<()>,
-) -> Element {
+pub fn BottomRightButtons(on_settings: EventHandler<()>) -> Element {
     rsx! {
         rect {
             position: "absolute",
@@ -43,7 +41,7 @@ pub fn BottomRightButtons(
             cross_align: "end",
             spacing: "12",
             padding: "32",
-            
+
             MyButton {
                 onpress: move |_| println!("Game tracker clicked!"),
                 rect {
@@ -63,7 +61,7 @@ pub fn BottomRightButtons(
                     }
                 }
             }
-            
+
             MyButton {
                 onpress: move |_| on_settings.call(()),
                 rect {

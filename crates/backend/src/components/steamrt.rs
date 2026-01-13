@@ -1,7 +1,7 @@
-use anyhow::{Result, Context};
-use std::path::{Path, PathBuf};
+use anyhow::{Context, Result};
 use std::fs;
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tokio_stream::StreamExt;
 
@@ -25,16 +25,28 @@ fn is_steamrt_complete(version_dir: &Path) -> bool {
 pub async fn prepare_steamrt(settings: &GlobalSettings) -> Result<SteamRtSetup> {
     let steamrt_dir = settings.components_directory.join("steamrt");
     let version_dir = steamrt_dir.join(STEAMRT_VERSION);
-    
+
     let is_complete = version_dir.exists() && is_steamrt_complete(&version_dir);
-    
+
+    // Clean up interrupted download markers if installation is incomplete
+    if !is_complete {
+        let tarball_path = steamrt_dir.join(STEAMRT_TARBALL);
+        let resume_marker = steamrt_dir.join(".steamrt_download_progress");
+
+        // If we have a partial download but no complete installation, clean up
+        if resume_marker.exists() {
+            println!("Detected interrupted Steam Runtime download, cleaning up stale markers...");
+            let _ = fs::remove_file(&resume_marker);
+            // Also remove partial tarball to ensure fresh download
+            if tarball_path.exists() {
+                let _ = fs::remove_file(&tarball_path);
+            }
+        }
+    }
+
     let needs_download = !is_complete;
 
-    let runtime_path = if is_complete {
-        Some(version_dir)
-    } else {
-        None
-    };
+    let runtime_path = if is_complete { Some(version_dir) } else { None };
 
     Ok(SteamRtSetup {
         runtime_path,
@@ -44,7 +56,10 @@ pub async fn prepare_steamrt(settings: &GlobalSettings) -> Result<SteamRtSetup> 
 }
 
 pub fn get_download_url() -> String {
-    format!("{}/{}/{}", STEAMRT_BASE_URL, STEAMRT_VERSION, STEAMRT_TARBALL)
+    format!(
+        "{}/{}/{}",
+        STEAMRT_BASE_URL, STEAMRT_VERSION, STEAMRT_TARBALL
+    )
 }
 
 pub fn get_checksum_url() -> String {
@@ -57,20 +72,26 @@ pub async fn download_steamrt(
 ) -> Result<PathBuf> {
     let steamrt_dir = settings.components_directory.join("steamrt");
     let version_dir = steamrt_dir.join(STEAMRT_VERSION);
-    
+
     if version_dir.exists() && is_steamrt_complete(&version_dir) {
         println!("Steam Runtime {} already exists", STEAMRT_VERSION);
         return Ok(version_dir);
     }
 
+    // Clean up incomplete installation
+    if version_dir.exists() && !is_steamrt_complete(&version_dir) {
+        println!("Removing incomplete Steam Runtime installation...");
+        let _ = fs::remove_dir_all(&version_dir);
+    }
+
     println!("Downloading Steam Runtime {}...", STEAMRT_VERSION);
-    
+
     fs::create_dir_all(&steamrt_dir)?;
-    
+
     let download_url = get_download_url();
     let tarball_path = steamrt_dir.join(STEAMRT_TARBALL);
     let resume_marker = steamrt_dir.join(".steamrt_download_progress");
-    
+
     let start_byte = if tarball_path.exists() && resume_marker.exists() {
         match fs::metadata(&tarball_path) {
             Ok(metadata) => {
@@ -88,40 +109,46 @@ pub async fn download_steamrt(
 
     let client = reqwest::Client::new();
     let mut request = client.get(&download_url);
-    
+
     if start_byte > 0 {
         request = request.header("Range", format!("bytes={}-", start_byte));
     }
-    
-    let response = request.send().await
+
+    let response = request
+        .send()
+        .await
         .context("Failed to download Steam Runtime")?;
-    
-    if !response.status().is_success() && response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
-        return Err(anyhow::anyhow!("Download failed with status: {}", response.status()));
+
+    if !response.status().is_success() && response.status() != reqwest::StatusCode::PARTIAL_CONTENT
+    {
+        return Err(anyhow::anyhow!(
+            "Download failed with status: {}",
+            response.status()
+        ));
     }
-    
+
     let total_size = if start_byte > 0 {
         response.content_length().unwrap_or(0) + start_byte
     } else {
         response.content_length().unwrap_or(0)
     };
-    
+
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&tarball_path)?;
-    
+
     fs::write(&resume_marker, "")?;
-    
+
     let mut downloaded = start_byte;
     let mut stream = response.bytes_stream();
     let mut last_update = Instant::now();
-    
+
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result?;
         file.write_all(&chunk)?;
         downloaded += chunk.len() as u64;
-        
+
         let now = Instant::now();
         if now.duration_since(last_update) >= Duration::from_millis(100) {
             if let Some(ref callback) = progress_callback {
@@ -130,95 +157,106 @@ pub async fn download_steamrt(
             last_update = now;
         }
     }
-    
+
     if let Some(ref callback) = progress_callback {
         callback(downloaded, total_size);
     }
-    
+
     drop(file);
-    
+
     let _ = fs::remove_file(&resume_marker);
-    
+
     println!("Download complete. Extracting...");
-    
+
     if version_dir.exists() {
         let _ = fs::remove_dir_all(&version_dir);
     }
-    
+
     let tarball_clone = tarball_path.clone();
     let version_clone = version_dir.clone();
-    tokio::task::spawn_blocking(move || {
-        extract_tarball(&tarball_clone, &version_clone)
-    }).await??;
-    
+    let extraction_result =
+        tokio::task::spawn_blocking(move || extract_tarball(&tarball_clone, &version_clone))
+            .await?;
+
+    // If extraction fails, clean up the incomplete installation
+    if let Err(e) = extraction_result {
+        eprintln!(
+            "Steam Runtime extraction failed: {}. Cleaning up partial installation and tarball...",
+            e
+        );
+        let _ = fs::remove_dir_all(&version_dir);
+        let _ = fs::remove_file(&tarball_path);
+        return Err(e.context("Failed to extract Steam Runtime. The partial download has been cleaned up. Please try downloading again."));
+    }
+
     let marker_path = version_dir.join(".elysia_steamrt_installed");
     fs::write(&marker_path, STEAMRT_VERSION)?;
-    
+
     fs::remove_file(&tarball_path)?;
-    
+
     if let Some(ref callback) = progress_callback {
         callback(total_size, total_size);
     }
-    
-    println!("Steam Runtime {} installed to {:?}", STEAMRT_VERSION, version_dir);
-    
+
+    println!(
+        "Steam Runtime {} installed to {:?}",
+        STEAMRT_VERSION, version_dir
+    );
+
     Ok(version_dir)
 }
 
 fn extract_tarball(tarball_path: &Path, dest_dir: &Path) -> Result<()> {
     fs::create_dir_all(dest_dir)?;
-    
+
     let file = fs::File::open(tarball_path)?;
     let decompressor = xz2::read::XzDecoder::new(file);
     let mut archive = tar::Archive::new(decompressor);
-    
+
     archive.unpack(dest_dir)?;
-    
+
     Ok(())
 }
 
 pub async fn verify_checksum(settings: &GlobalSettings) -> Result<bool> {
     let steamrt_dir = settings.components_directory.join("steamrt");
     let tarball_path = steamrt_dir.join(STEAMRT_TARBALL);
-    
+
     if !tarball_path.exists() {
         return Ok(false);
     }
 
     let checksum_url = get_checksum_url();
-    let checksums = reqwest::get(&checksum_url)
-        .await?
-        .text()
-        .await?;
-    
+    let checksums = reqwest::get(&checksum_url).await?.text().await?;
+
     let expected_hash = checksums
         .lines()
         .find(|line| line.contains(STEAMRT_TARBALL))
         .and_then(|line| line.split_whitespace().next())
         .context("Checksum not found in SHA256SUMS")?;
-    
-    use sha2::{Sha256, Digest};
+
+    use sha2::{Digest, Sha256};
     let mut file = fs::File::open(&tarball_path)?;
     let mut hasher = Sha256::new();
     std::io::copy(&mut file, &mut hasher)?;
     let actual_hash = format!("{:x}", hasher.finalize());
-    
+
     Ok(actual_hash == expected_hash)
 }
 
 pub fn cleanup_old_versions(settings: &GlobalSettings) -> Result<()> {
     let steamrt_dir = settings.components_directory.join("steamrt");
-    
+
     if !steamrt_dir.exists() {
         return Ok(());
     }
 
     let entries = fs::read_dir(&steamrt_dir)?;
-    
+
     for entry in entries {
         let entry = entry?;
         let path = entry.path();
-        
+
         if path.is_dir() {
             if let Some(name) = path.file_name() {
                 let name = name.to_string_lossy();

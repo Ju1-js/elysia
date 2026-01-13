@@ -1,5 +1,8 @@
 use freya::prelude::*;
 
+#[cfg(debug_assertions)]
+use crate::debug_info;
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum VideoSlot {
     Primary,
@@ -50,6 +53,7 @@ pub struct VideoState {
     secondary: SlotData,
     pub active_slot: Signal<VideoSlot>,
     pub transitioning: Signal<bool>,
+    pub paused: Signal<bool>, // Track if video is paused
 }
 
 impl VideoState {
@@ -59,6 +63,7 @@ impl VideoState {
             secondary: SlotData::new(),
             active_slot: Signal::new(VideoSlot::Primary),
             transitioning: Signal::new(false),
+            paused: Signal::new(false),
         };
         state.primary.opacity.set(1.0);
         state
@@ -108,11 +113,27 @@ impl VideoState {
     }
 
     pub fn reset(&mut self) {
+        #[cfg(debug_assertions)]
+        debug_info!("VideoState reset called");
+        
         self.primary.clear();
         self.secondary.clear();
         self.active_slot.set(VideoSlot::Primary);
         self.primary.opacity.set(1.0);
         self.transitioning.set(false);
+        self.paused.set(false);
+    }
+
+    pub fn pause(&mut self) {
+        self.paused.set(true);
+    }
+
+    pub fn resume(&mut self) {
+        self.paused.set(false);
+    }
+
+    pub fn is_paused(&self) -> bool {
+        *self.paused.read()
     }
 
     pub fn load_next_video(&mut self, url: Option<String>) {
@@ -142,7 +163,7 @@ impl VideoState {
             VideoSlot::Primary => (&mut self.primary, &mut self.secondary),
             VideoSlot::Secondary => (&mut self.secondary, &mut self.primary),
         };
-        
+
         fade_out.opacity.set(1.0 - progress);
         fade_in.opacity.set(progress);
     }
@@ -153,7 +174,7 @@ impl VideoState {
             VideoSlot::Primary => (&mut self.primary, &mut self.secondary),
             VideoSlot::Secondary => (&mut self.secondary, &mut self.primary),
         };
-        
+
         active_slot.opacity.set(1.0);
         inactive_slot.opacity.set(0.0);
         self.transitioning.set(false);

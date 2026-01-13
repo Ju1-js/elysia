@@ -1,15 +1,11 @@
 #![allow(dead_code)]
-use std::{
-    collections::HashMap,
-    fs,
-    path::PathBuf,
-};
-use serde::{Deserialize, Serialize};
 use crate::{
     globals::{CONFIG_PATH, DATA_PATH},
     runners::Runners,
 };
 use common::utils::filesystem::ensure_or_default;
+use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, fs, path::PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -19,6 +15,9 @@ pub struct GlobalSettings {
     pub temp_directory: PathBuf,
     pub cache_directory: PathBuf,
     pub installed_games: HashMap<String, InstalledGame>,
+    pub game_preferences: HashMap<String, GamePreferences>,
+    pub default_preferences: GamePreferences,
+    pub disable_videos: bool,
 }
 
 impl Default for GlobalSettings {
@@ -34,6 +33,9 @@ impl Default for GlobalSettings {
             temp_directory,
             cache_directory,
             installed_games: HashMap::new(),
+            game_preferences: HashMap::new(),
+            default_preferences: GamePreferences::default(),
+            disable_videos: false,
         }
     }
 }
@@ -82,8 +84,8 @@ impl GlobalSettings {
         }
     }
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct InstalledGame {
     pub id: String,
     pub biz_name: String,
@@ -94,6 +96,30 @@ pub struct InstalledGame {
     pub environment: HashMap<String, String>,
     pub runner: Runners,
     pub runtime_components: Vec<RuntimeComponents>,
+    pub enable_winewayland: bool,
+    pub enable_mangohud: bool,
+    pub enable_gamemode: bool,
+}
+
+impl Default for InstalledGame {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            biz_name: String::new(),
+            install_path: PathBuf::new(),
+            executable_path: PathBuf::new(),
+            command_wrapper: None,
+            command_arguments: None,
+            environment: HashMap::new(),
+            runner: Runners::Proton(crate::runners::Proton {
+                version: String::new(),
+            }),
+            runtime_components: Vec::new(),
+            enable_winewayland: false,
+            enable_mangohud: false,
+            enable_gamemode: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,3 +130,30 @@ pub enum RuntimeComponents {
 }
 
 type ComponentVersion = String;
+
+/// Game preferences stored even before a game is installed
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GamePreferences {
+    pub runner: Runners,
+    pub runtime_components: Vec<RuntimeComponents>,
+    pub command_wrapper: Option<String>,
+    pub enable_winewayland: bool,
+    pub enable_mangohud: bool,
+    pub enable_gamemode: bool,
+}
+
+impl Default for GamePreferences {
+    fn default() -> Self {
+        Self {
+            runner: Runners::Proton(crate::runners::Proton {
+                version: String::new(), // Empty version will be resolved to first available Proton (typically the latest)
+            }),
+            runtime_components: Vec::new(),
+            command_wrapper: None,
+            enable_winewayland: false,
+            enable_mangohud: false,
+            enable_gamemode: false,
+        }
+    }
+}

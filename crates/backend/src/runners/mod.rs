@@ -1,23 +1,47 @@
-mod proton;
-mod wine;
+pub mod proton;
+pub mod wine;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::process::Command;
 
+use crate::components::{ComponentManager, ComponentType, ComponentVersion};
+use crate::progress::ProgressTracker;
 pub use crate::runners::{proton::Proton, wine::Wine};
 use crate::settings::{GlobalSettings, InstalledGame};
-use crate::components::{
-    steamrt, 
-    tweaks::TweakManifest, 
-    ComponentManager, 
-    ComponentType,
-    installer::{ComponentRequirement, install_components},
-};
-use crate::progress::ProgressTracker;
 
 pub trait Runner {
-    fn run_game(&self, settings: &GlobalSettings, game: &InstalledGame) -> Result<(), String>;
+    fn run_game(&self, settings: &GlobalSettings, game: &InstalledGame) -> Result<std::process::Child, String>;
+}
+
+/// Kill a Wine/Proton process using wineserver
+/// 
+/// This is a common utility used by both Wine and Proton runners
+pub fn kill_wineserver(wineserver_path: &std::path::Path, prefix_path: &str) -> Result<()> {
+    if !wineserver_path.exists() {
+        return Err(anyhow::anyhow!("wineserver not found at {:?}", wineserver_path));
+    }
+
+    let status = Command::new(wineserver_path)
+        .arg("-k")
+        .env("WINEPREFIX", prefix_path)
+        .status()
+        .context("Failed to execute wineserver")?;
+
+    if !status.success() {
+        return Err(anyhow::anyhow!("wineserver -k failed"));
+    }
+
+    Ok(())
+}
+
+/// Shell-escape a string for safe use in shell commands
+pub(crate) fn shell_escape(s: &str) -> String {
+    if s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.' || c == '/') {
+        s.to_string()
+    } else {
+        format!("'{}'", s.replace('\'', r"'\''"))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,9 +52,9 @@ pub enum Runners {
 }
 
 impl Runner for Runners {
-    fn run_game(&self, settings: &GlobalSettings, game: &InstalledGame) -> Result<(), String> {
+    fn run_game(&self, settings: &GlobalSettings, game: &InstalledGame) -> Result<std::process::Child, String> {
         match self {
-            Runners::Native => Ok(()),
+            Runners::Native => Err("Native runner not implemented".to_string()),
             Runners::Wine(wine) => wine.run_game(settings, game),
             Runners::Proton(proton) => proton.run_game(settings, game),
         }
@@ -38,85 +62,162 @@ impl Runner for Runners {
 }
 
 impl Runners {
-    pub async fn ensure_runtime(
+    pub fn is_proton(&self) -> bool {
+        matches!(self, Runners::Proton(_))
+    }
+
+    pub fn is_wine(&self) -> bool {
+        matches!(self, Runners::Wine(_))
+    }
+
+    pub fn is_native(&self) -> bool {
+        matches!(self, Runners::Native)
+    }
+
+    pub async fn get_wine_status(
         &self,
         settings: &GlobalSettings,
-        game: &InstalledGame,
-        component_manager: &ComponentManager,
-        tweak_manifest: &TweakManifest,
+        component_manager: &mut ComponentManager,
+    ) -> Option<(bool, Option<String>, Vec<ComponentVersion>)> {
+        if !self.is_wine() {
+            return None;
+        }
+
+        let _ = component_manager.refresh_component(ComponentType::Wine).await;
+        let installed_version = component_manager.get_installed_version(settings, ComponentType::Wine);
+        let installed = installed_version.is_some();
+
+        let available_versions: Vec<ComponentVersion> = component_manager
+            .cache
+            .entries
+            .get(&ComponentType::Wine)
+            .map(|versions| versions.iter().take(3).cloned().collect())
+            .unwrap_or_default();
+
+        Some((installed, installed_version, available_versions))
+    }
+
+    pub async fn get_proton_status(
+        &self,
+        settings: &GlobalSettings,
+        component_manager: &mut ComponentManager,
+    ) -> Option<(bool, Option<String>, Vec<ComponentVersion>)> {
+        if !self.is_proton() {
+            return None;
+        }
+
+        let _ = component_manager.refresh_component(ComponentType::Proton).await;
+        let installed_version = component_manager.get_installed_version(settings, ComponentType::Proton);
+        let installed = installed_version.is_some();
+
+        let available_versions: Vec<ComponentVersion> = component_manager
+            .cache
+            .entries
+            .get(&ComponentType::Proton)
+            .map(|versions| versions.iter().take(3).cloned().collect())
+            .unwrap_or_default();
+
+        Some((installed, installed_version, available_versions))
+    }
+
+    pub async fn get_dxvk_status(
+        &self,
+        settings: &GlobalSettings,
+        component_manager: &mut ComponentManager,
+    ) -> Option<(bool, Option<String>, Vec<ComponentVersion>)> {
+        if !self.is_wine() {
+            return None;
+        }
+
+        let _ = component_manager.refresh_component(ComponentType::Dxvk).await;
+        let installed_version = component_manager.get_installed_version(settings, ComponentType::Dxvk);
+        let installed = installed_version.is_some();
+
+        let available_versions: Vec<ComponentVersion> = component_manager
+            .cache
+            .entries
+            .get(&ComponentType::Dxvk)
+            .map(|versions| versions.iter().take(3).cloned().collect())
+            .unwrap_or_default();
+
+        Some((installed, installed_version, available_versions))
+    }
+
+    pub async fn download_proton(
+        settings: &GlobalSettings,
+        component_manager: &mut ComponentManager,
+        version: Option<&str>,
         progress_tracker: Option<&ProgressTracker>,
         progress_key: &str,
-    ) -> Result<HashMap<String, String>> {
-        let mut requirements = Vec::new();
-        
-        if tweak_manifest.needs_jadeite(&game.id) {
-            if !component_manager.is_installed(settings, ComponentType::Jadeite) {
-                requirements.push(ComponentRequirement {
-                    component_type: ComponentType::Jadeite,
-                    display_name: "Jadeite".to_string(),
-                });
-            }
+    ) -> Result<()> {
+        let _ = component_manager.refresh_component(ComponentType::Proton).await;
+
+        let display_name = component_manager
+            .get_latest_version(ComponentType::Proton)
+            .map(|v| v.display_name.clone())
+            .unwrap_or_else(|| "Proton".to_string());
+
+        component_manager
+            .download_component(
+                settings,
+                ComponentType::Proton,
+                version,
+                progress_tracker.map(|pt| {
+                    let pt = pt.clone();
+                    let key = progress_key.to_string();
+                    let name = display_name.clone();
+                    Box::new(move |current, total| {
+                        pt.report(&key, &name, current, total, true, None, None);
+                    }) as Box<dyn Fn(u64, u64) + Send>
+                }),
+            )
+            .await?;
+
+        if let Some(pt) = progress_tracker {
+            pt.finish(progress_key);
         }
 
-        match self {
-            Runners::Native => {}
-            Runners::Wine(_) => {
-                if !component_manager.is_installed(settings, ComponentType::Dxvk) {
-                    requirements.push(ComponentRequirement {
-                        component_type: ComponentType::Dxvk,
-                        display_name: "DXVK".to_string(),
-                    });
-                }
-            }
-            Runners::Proton(_) => {
-                if !component_manager.is_installed(settings, ComponentType::Umu) {
-                    requirements.push(ComponentRequirement {
-                        component_type: ComponentType::Umu,
-                        display_name: "umu-launcher".to_string(),
-                    });
-                }
-                
-                let steamrt_setup = steamrt::prepare_steamrt(settings).await?;
-                if steamrt_setup.needs_download {
-                    requirements.push(ComponentRequirement {
-                        component_type: ComponentType::SteamRuntime,
-                        display_name: "Steam Runtime".to_string(),
-                    });
-                }
-            }
+        Ok(())
+    }
+
+    pub async fn download_wine(
+        settings: &GlobalSettings,
+        component_manager: &ComponentManager,
+        version: Option<&str>,
+        progress_tracker: Option<&ProgressTracker>,
+        progress_key: &str,
+    ) -> Result<()> {
+        let display_name = component_manager
+            .get_latest_version(ComponentType::Wine)
+            .map(|v| v.display_name.clone())
+            .unwrap_or_else(|| "Wine".to_string());
+
+        component_manager
+            .download_component(
+                settings,
+                ComponentType::Wine,
+                version,
+                progress_tracker.map(|pt| {
+                    let pt = pt.clone();
+                    let key = progress_key.to_string();
+                    let name = display_name.clone();
+                    Box::new(move |current, total| {
+                        pt.report(&key, &name, current, total, true, None, None);
+                    }) as Box<dyn Fn(u64, u64) + Send>
+                }),
+            )
+            .await?;
+
+        if let Some(pt) = progress_tracker {
+            pt.finish(progress_key);
         }
-        
-        install_components(
-            settings,
-            component_manager,
-            requirements,
-            progress_tracker,
-            progress_key,
-        ).await
-    }
 
-    pub async fn is_proton_runtime_installed(
-        settings: &GlobalSettings,
-        component_manager: &ComponentManager,
-    ) -> bool {
-        let umu_installed = component_manager.is_installed(settings, ComponentType::Umu);
-        let steamrt_setup = steamrt::prepare_steamrt(settings).await.ok();
-        let steamrt_installed = steamrt_setup.map_or(false, |s| !s.needs_download);
-        
-        umu_installed && steamrt_installed
-    }
-
-    pub async fn are_tweaks_installed(
-        settings: &GlobalSettings,
-        _game_id: &str,
-        component_manager: &ComponentManager,
-    ) -> bool {
-        component_manager.is_installed(settings, ComponentType::Jadeite)
+        Ok(())
     }
 
     pub async fn download_proton_runtime(
         settings: &GlobalSettings,
-        component_manager: &ComponentManager,
+        component_manager: &mut ComponentManager,
         progress_tracker: Option<&ProgressTracker>,
         progress_key: &str,
     ) -> Result<()> {
@@ -125,22 +226,43 @@ impl Runners {
             component_manager,
             progress_tracker,
             progress_key,
-        ).await
+        )
+        .await
     }
 
-    pub async fn download_tweaks(
+    pub async fn download_dxvk(
         settings: &GlobalSettings,
-        game_id: &str,
         component_manager: &ComponentManager,
+        version: Option<&str>,
         progress_tracker: Option<&ProgressTracker>,
         progress_key: &str,
     ) -> Result<()> {
-        crate::components::install_tweaks(
-            settings,
-            game_id,
-            component_manager,
-            progress_tracker,
-            progress_key,
-        ).await
+        let display_name = component_manager
+            .get_latest_version(ComponentType::Dxvk)
+            .map(|v| v.display_name.clone())
+            .unwrap_or_else(|| "DXVK".to_string());
+
+        component_manager
+            .download_component(
+                settings,
+                ComponentType::Dxvk,
+                version,
+                progress_tracker.map(|pt| {
+                    let pt = pt.clone();
+                    let key = progress_key.to_string();
+                    let name = display_name.clone();
+                    Box::new(move |current, total| {
+                        pt.report(&key, &name, current, total, true, None, None);
+                    }) as Box<dyn Fn(u64, u64) + Send>
+                }),
+            )
+            .await?;
+
+        if let Some(pt) = progress_tracker {
+            pt.finish(progress_key);
+        }
+
+        Ok(())
     }
+
 }

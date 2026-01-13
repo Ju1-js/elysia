@@ -1,11 +1,12 @@
-use std::sync::{Arc, RwLock};
 use bytes::Bytes;
 use freya::prelude::*;
 use libwebp::WebPDecodeRGBA;
 use reqwest::{Url, header::CONTENT_TYPE};
 use skia_safe::{AlphaType, ColorType, Data, EncodedImageFormat, ImageInfo};
+use std::sync::{Arc, RwLock};
 
 use backend::settings::GlobalSettings;
+use crate::{debug, debug_info};
 
 #[derive(Props, Clone, PartialEq)]
 pub struct MyNetworkImageProps {
@@ -24,6 +25,7 @@ pub struct MyNetworkImageProps {
     pub sampling: Option<String>,
 }
 
+/// Network image component with caching support
 #[component]
 pub fn MyNetworkImage(
     MyNetworkImageProps {
@@ -44,7 +46,8 @@ pub fn MyNetworkImage(
     let settings_signal = use_context::<Signal<Arc<RwLock<GlobalSettings>>>>();
 
     let cache_path = use_memo(move || {
-        settings_signal.read()
+        settings_signal
+            .read()
             .read()
             .ok()
             .map(|s| s.cache_directory.clone())
@@ -57,27 +60,35 @@ pub fn MyNetworkImage(
         let url_value = url.read().clone();
         let cache_path_value = cache_path();
         let cache_key = url_value.to_string();
-        
+
+        debug!("MyNetworkImage loading: {}", cache_key);
+
         let bytes = match cacache::read(&cache_path_value, &cache_key).await {
-            Ok(cached_bytes) => Bytes::from(cached_bytes),
+            Ok(cached_bytes) => {
+                debug_info!("Image cache hit: {} (~{} KB)", cache_key, cached_bytes.len() / 1024);
+                Bytes::from(cached_bytes)
+            },
             Err(_) => {
+                debug_info!("Image cache miss, fetching: {}", cache_key);
                 let fetched_bytes = fetch_image(url_value).await?;
-                
+                debug_info!("Image fetched: {} (~{} KB)", cache_key, fetched_bytes.len() / 1024);
+
                 let cache_path_clone = cache_path_value.clone();
                 let key_clone = cache_key.clone();
                 let bytes_clone = fetched_bytes.clone();
-                
+
                 tokio::spawn(async move {
                     let _ = cacache::write(&cache_path_clone, &key_clone, &bytes_clone).await;
+                    debug!("Image cached: {}", key_clone);
                 });
-                
+
                 fetched_bytes
             }
         };
 
         Ok::<Bytes, String>(bytes)
     }));
-    
+
     let url_string = url.read().to_string();
 
     match &*image_resource.read_unchecked() {
@@ -164,6 +175,7 @@ pub async fn fetch_image(url: Url) -> Result<Bytes, String> {
     }
 }
 
+/// Convert WebP image bytes to PNG format
 fn transcode_webp_to_png(webp_bytes: &[u8]) -> Result<Bytes, String> {
     let (width, height, rgba_pixels) = WebPDecodeRGBA(webp_bytes)
         .map_err(|err| format!("Failed to decode WebP image: {}", err))?;
@@ -178,9 +190,9 @@ fn transcode_webp_to_png(webp_bytes: &[u8]) -> Result<Bytes, String> {
     let row_bytes = (width as usize)
         .checked_mul(4)
         .ok_or_else(|| format!("Image dimensions too large: {}x{}", width, height))?;
-    
+
     let pixel_data = Data::new_copy(&rgba_pixels);
-    
+
     let image = skia_safe::images::raster_from_data(&image_info, pixel_data, row_bytes)
         .ok_or_else(|| "Failed to create Skia image from raw data".to_string())?;
 

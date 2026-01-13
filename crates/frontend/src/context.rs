@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use backend::game_providers::hoyoplay::proto::{Content, Game, GameBasicInfo};
+use std::collections::HashMap;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]

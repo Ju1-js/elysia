@@ -1,5 +1,6 @@
 use freya::prelude::*;
 
+/// Expand container that centers children
 #[component]
 pub fn Expand(children: Element) -> Element {
     rsx!(

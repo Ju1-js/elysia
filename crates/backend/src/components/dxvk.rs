@@ -1,27 +1,30 @@
+use crate::components::ComponentVersion;
 use anyhow::Result;
 use reqwest::Url;
-use crate::components::ComponentVersion;
-use common::git;
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct DxvkEntry {
+    name: String,
+    title: String,
+    uri: String,
+}
 
 pub async fn fetch_versions() -> Result<Vec<ComponentVersion>> {
-    let repo = "doitsujin/dxvk";
-    let releases = git::github_releases(repo).await?;
-    
-    let versions = releases
+    // Use include_str! to embed the JSON file at compile time
+    let content = include_str!("dxvk/vanilla.json");
+    let entries: Vec<DxvkEntry> = serde_json::from_str(content)?;
+
+    let versions = entries
         .into_iter()
-        .filter_map(|rel| {
-            let version = &rel.tag_name[1..];
-            rel.assets
-                .iter()
-                .find(|asset| asset.name == format!("dxvk-{}.tar.gz", version))
-                .and_then(|asset| {
-                    Some(ComponentVersion {
-                        version: rel.tag_name.clone(),
-                        download_url: Url::parse(&asset.browser_download_url).ok()?,
-                    })
-                })
+        .filter_map(|entry| {
+            Some(ComponentVersion {
+                version: entry.name.clone(), // Use name for folder structure
+                download_url: Url::parse(&entry.uri).ok()?,
+                display_name: entry.title.clone(),
+            })
         })
         .collect();
-    
+
     Ok(versions)
 }

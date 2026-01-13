@@ -1,9 +1,10 @@
-mod types;
 mod polling;
+mod types;
 
+use polling::{poll_download, poll_runtime_setup, poll_tweaks_setup};
 pub use types::*;
-use polling::{poll_runtime_setup, poll_tweaks_setup, poll_download};
 
+use crate::theme;
 use freya::prelude::*;
 use std::rc::Rc;
 
@@ -15,7 +16,7 @@ pub struct DownloadControlProps {
     pub get_game_progress: Rc<dyn Fn(&str) -> Option<types::DownloadProgress>>,
     pub get_runtime_progress: Rc<dyn Fn(&str) -> Option<types::SetupProgress>>,
     pub get_tweaks_progress: Rc<dyn Fn(&str) -> Option<types::SetupProgress>>,
-    #[props(default = "#ff9500".to_string())]
+    #[props(default = theme::ACCENT_PRIMARY.to_string())]
     pub accent_color: String,
     #[props(default)]
     pub on_setup_runtime: Option<EventHandler<PressEvent>>,
@@ -23,7 +24,7 @@ pub struct DownloadControlProps {
     pub on_setup_tweaks: Option<EventHandler<PressEvent>>,
     #[props(default)]
     pub on_download_game: Option<EventHandler<PressEvent>>,
-    pub game_state: crate::pages::GlobalGameStateSignal,
+    pub game_state: crate::pages::game::state::GlobalGameStateSignal,
     pub game_needs_tweaks: bool,
 }
 
@@ -80,14 +81,10 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
     let tweaks_progress = use_signal(|| None::<types::SetupProgress>);
     let game_progress = use_signal(|| None::<types::DownloadProgress>);
 
-    let runtime_active = use_memo(use_reactive!(|game_state| {
-        let active = game_state.read().runtime_setup.active;
-        eprintln!("[DownloadControl] runtime_active: {}", active);
-        active
-    }));
+    let runtime_active = use_signal(|| false); // Dummy signal for polling (we poll unconditionally now)
 
     let runtime_ready = use_memo(use_reactive!(|game_state| {
-        let ready = game_state.read().runtime_setup.ready;
+        let ready = game_state.read().is_runtime_ready();
         eprintln!("[DownloadControl] runtime_ready: {}", ready);
         ready
     }));
@@ -100,7 +97,7 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
         if !game_needs_tweaks {
             return true;
         }
-        
+
         game_state.read().get_tweaks_state(&game_id).ready
     }));
 
@@ -111,47 +108,42 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
     let is_installed = use_memo(use_reactive!(|game_state, game_id| {
         game_state.read().get_download_state(&game_id).installed
     }));
-    
+
     // Convert memos to signals for polling functions
-    let mut runtime_active_signal = use_signal(move || *runtime_active.read());
+    let runtime_active_signal = runtime_active;
     let mut tweaks_active_signal = use_signal(move || *tweaks_active.read());
     let mut is_downloading_signal = use_signal(move || *is_downloading.read());
-    
-    // Update these signals when memos change
-    use_effect(use_reactive!(|runtime_active| {
-        runtime_active_signal.set(*runtime_active.read());
-    }));
-    
+
     use_effect(use_reactive!(|tweaks_active| {
         tweaks_active_signal.set(*tweaks_active.read());
     }));
-    
+
     use_effect(use_reactive!(|is_downloading| {
         is_downloading_signal.set(*is_downloading.read());
     }));
-    
-    // Poll for progress when active
+
+    // Poll for progress - runtime polls unconditionally now
     poll_runtime_setup(
-        runtime_active_signal, 
-        "runtime_setup", 
-        get_runtime_progress, 
+        runtime_active_signal,
+        "runtime_setup",
+        get_runtime_progress,
         runtime_progress,
         game_state,
     );
-    
+
     poll_tweaks_setup(
-        tweaks_active_signal, 
+        tweaks_active_signal,
         "tweaks_setup",
         game_id.clone(),
-        get_tweaks_progress, 
+        get_tweaks_progress,
         tweaks_progress,
         game_state,
     );
-    
+
     poll_download(
         is_downloading_signal,
-        &game_progress_key, 
-        get_game_progress, 
+        &game_progress_key,
+        get_game_progress,
         game_progress,
         game_state,
         game_id.clone(),
@@ -166,7 +158,7 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
             width: "100%",
             direction: "vertical",
             spacing: "8",
-            
+
             if let Some(setup) = runtime_progress.read().as_ref() {
                 SetupWidget {
                     setup: setup.clone(),
@@ -175,7 +167,7 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
                     font: font_theme.clone(),
                 }
             }
-            
+
             if game_needs_tweaks {
                 if let Some(setup) = tweaks_progress.read().as_ref() {
                     SetupWidget {
@@ -186,7 +178,7 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
                     }
                 }
             }
-            
+
             if let Some(progress) = game_progress.read().as_ref() {
                 if progress.is_busy {
                     DownloadWidget {
@@ -206,6 +198,7 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
                 tweaks_busy,
                 game_busy,
                 game_needs_tweaks,
+                missing_components: game_state.read().get_missing_components(),
                 on_setup_runtime,
                 on_setup_tweaks,
                 on_download_game,
@@ -223,32 +216,70 @@ fn ActionButton(
     tweaks_busy: bool,
     game_busy: bool,
     game_needs_tweaks: bool,
+    missing_components: Vec<&'static str>,
     on_setup_runtime: Option<EventHandler<PressEvent>>,
     on_setup_tweaks: Option<EventHandler<PressEvent>>,
     on_download_game: Option<EventHandler<PressEvent>>,
 ) -> Element {
-    eprintln!("[ActionButton] runtime_ready: {}, tweaks_ready: {}, installed: {}, runtime_busy: {}, tweaks_busy: {}, game_busy: {}, game_needs_tweaks: {}", 
-        runtime_ready, tweaks_ready, installed, runtime_busy, tweaks_busy, game_busy, game_needs_tweaks);
+    let game_state = use_context::<crate::pages::game::state::GlobalGameStateSignal>();
+    let game_running = game_state.read().is_game_running();
     
+    // Don't show button while any operation is in progress
     if runtime_busy || tweaks_busy || game_busy {
         return rsx! {};
     }
-    
-    let (label, handler) = if !runtime_ready {
-        ("Download Runtime Setup", on_setup_runtime)
+
+    // Determine button LABEL based on current state
+    let label = if game_running {
+        "Kill Game".to_string()
+    } else if !runtime_ready {
+        if missing_components.is_empty() {
+            "Download Runtime Setup".to_string()
+        } else {
+            format!("Download {}", missing_components.join(" & "))
+        }
     } else if game_needs_tweaks && !tweaks_ready {
-        ("Download Tweaks", on_setup_tweaks)
+        "Download Tweaks".to_string()
     } else if !installed {
-        ("Download Game", on_download_game)
+        "Download Game".to_string()
     } else {
-        ("Start Game", on_download_game)
+        "Start Game".to_string()
     };
 
-    eprintln!("[ActionButton] Showing button: {}", label);
+    // Create ONE dynamic handler that checks state when clicked
+    let dynamic_handler = EventHandler::new(move |evt| {
+        let mut state = game_state;
+        let is_running = state.read().is_game_running();
+        
+        eprintln!("[ActionButton Click] game_running: {}", is_running);
+        
+        if is_running {
+            // Kill game
+            match state.write().kill_game() {
+                Ok(_) => eprintln!("[ActionButton] Game process killed successfully"),
+                Err(e) => eprintln!("[ActionButton] Failed to kill game: {}", e),
+            }
+        } else if !runtime_ready {
+            // Setup runtime
+            if let Some(handler) = on_setup_runtime {
+                handler.call(evt);
+            }
+        } else if game_needs_tweaks && !tweaks_ready {
+            // Setup tweaks
+            if let Some(handler) = on_setup_tweaks {
+                handler.call(evt);
+            }
+        } else {
+            // Download or start game
+            if let Some(handler) = on_download_game {
+                handler.call(evt);
+            }
+        }
+    });
 
     rsx! {
         crate::components::MyButton {
-            onpress: handler,
+            onpress: dynamic_handler,
             rect {
                 direction: "horizontal",
                 cross_align: "center",
@@ -264,13 +295,22 @@ fn ActionButton(
 }
 
 #[component]
-fn SetupWidget(setup: types::SetupProgress, title: &'static str, accent: String, font: FontTheme) -> Element {
-    let step = format!("Step {} of {}: {}", 
-        setup.current_step_index + 1, 
-        setup.total_steps,
-        setup.current_step.description()
+fn SetupWidget(
+    setup: types::SetupProgress,
+    title: &'static str,
+    accent: String,
+    font: FontTheme,
+) -> Element {
+    // Top label shows generic step description (e.g., "Downloading Wine")
+    let generic_step = setup.current_step.description();
+
+    // Format step counter
+    let step = format!(
+        "Step {} of {}",
+        setup.current_step_index + 1,
+        setup.total_steps
     );
-    
+
     rsx!(
         rect {
             width: "100%",
@@ -283,19 +323,19 @@ fn SetupWidget(setup: types::SetupProgress, title: &'static str, accent: String,
             spacing: "10",
             shadow: "0 4 16 0 rgb(0, 0, 0, 80), 0 2 6 0 rgb(0, 0, 0, 50)",
             backdrop_blur: "16",
-            
+
             label {
                 color: "{font.color}",
                 font_size: "14",
                 font_weight: "700",
-                "{title}"
+                "{generic_step}"
             }
             label {
                 color: "{font.color}",
                 font_size: "13",
                 "{step}"
             }
-            
+
             if let Some(ref p) = setup.step_progress {
                 ProgressBar {
                     progress: p.clone(),
@@ -308,19 +348,29 @@ fn SetupWidget(setup: types::SetupProgress, title: &'static str, accent: String,
 }
 
 #[component]
-fn DownloadWidget(progress: types::DownloadProgress, name: String, accent: String, font: FontTheme) -> Element {
+fn DownloadWidget(
+    progress: types::DownloadProgress,
+    name: String,
+    accent: String,
+    font: FontTheme,
+) -> Element {
     let pct = if progress.total > 0 {
         (progress.downloaded as f64 / progress.total as f64) * 100.0
     } else {
         0.0
     };
-    
-    let status = if progress.total > 0 && (progress.status.starts_with("Downloading") || progress.status.starts_with("Extracting")) {
+
+    let status = if progress.total > 0
+        && (progress.status.starts_with("Downloading") || progress.status.starts_with("Extracting"))
+    {
         let dl_gb = progress.downloaded as f64 / 1_000_000_000.0;
         let total_gb = progress.total as f64 / 1_000_000_000.0;
-        
+
         if progress.speed_mb_s > 0.0 {
-            format!("{} - {:.2} GB / {:.2} GB - {:.2} MB/s", progress.status, dl_gb, total_gb, progress.speed_mb_s)
+            format!(
+                "{} - {:.2} GB / {:.2} GB - {:.2} MB/s",
+                progress.status, dl_gb, total_gb, progress.speed_mb_s
+            )
         } else {
             format!("{} - {:.2} GB / {:.2} GB", progress.status, dl_gb, total_gb)
         }
@@ -340,14 +390,14 @@ fn DownloadWidget(progress: types::DownloadProgress, name: String, accent: Strin
             spacing: "10",
             shadow: "0 4 16 0 rgb(0, 0, 0, 80), 0 2 6 0 rgb(0, 0, 0, 50)",
             backdrop_blur: "16",
-            
+
             label {
                 color: "{font.color}",
                 font_size: "14",
                 font_weight: "700",
                 "{name}"
             }
-            
+
             rect {
                 width: "100%",
                 height: "6",
@@ -361,7 +411,7 @@ fn DownloadWidget(progress: types::DownloadProgress, name: String, accent: Strin
                     corner_radius: "3",
                 }
             }
-            
+
             rect {
                 width: "100%",
                 direction: "horizontal",

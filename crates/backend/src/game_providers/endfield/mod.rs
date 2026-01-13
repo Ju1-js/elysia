@@ -1,18 +1,18 @@
-mod installer;
-mod download;
 pub mod api;
+mod download;
+mod installer;
 
+pub use download::{Progress, clear_progress, get_progress, set_progress};
 pub use installer::EndfieldInstaller;
-pub use download::{Progress, get_progress, set_progress, clear_progress};
 
-use std::path::{Path, PathBuf};
-use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
-use serde_json::Value;
 use crate::game_providers::hoyoplay::proto::{
-    Banner, Content, Display, Game, GameInfo, GetGameContent, GetGames, Image, ImageLink,
-    Post, SocialMedia,
+    Banner, Content, Display, Game, GameInfo, GetGameContent, GetGames, Image, ImageLink, Post,
+    SocialMedia,
 };
 use api::BatchProxyResponse;
+use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
+use serde_json::Value;
+use std::path::{Path, PathBuf};
 
 const BASE_URL: &str = "https://launcher.gryphline.com";
 
@@ -59,7 +59,10 @@ pub async fn batch_proxy_web_post(body: &Value) -> Result<Value, String> {
         .map_err(|e| format!("batch_proxy_web request error: {e}"))?;
 
     if !resp.status().is_success() {
-        return Err(format!("batch_proxy_web returned status: {}", resp.status()));
+        return Err(format!(
+            "batch_proxy_web returned status: {}",
+            resp.status()
+        ));
     }
 
     let json: Value = resp.json().await.map_err(|e| format!("parse json: {e}"))?;
@@ -82,7 +85,7 @@ pub async fn install_from_batch_body_value(
 ) -> Result<PathBuf, String> {
     std::fs::create_dir_all(games_dir)
         .map_err(|e| format!("Failed to create games directory: {}", e))?;
-    
+
     std::fs::create_dir_all(temp_dir)
         .map_err(|e| format!("Failed to create temp directory: {}", e))?;
 
@@ -109,7 +112,6 @@ pub async fn install_from_batch_body_value(
     for proxy in typed.proxy_rsps.into_iter() {
         if let Some(get_latest) = proxy.get_latest_game_rsp {
             if let Some(pkg) = get_latest.pkg {
-
                 let packs: Vec<api::Pack> = pkg
                     .packs
                     .into_iter()
@@ -157,12 +159,8 @@ pub async fn install_from_batch_body_value(
                     },
                 );
 
-                download::download_and_extract_streaming(
-                    packs,
-                    &dest,
-                    &progress_key,
-                    game_name,
-                ).await?;
+                download::download_and_extract_streaming(packs, &dest, &progress_key, game_name)
+                    .await?;
 
                 eprintln!("[INFO] Installation complete: {:?}", dest);
                 return Ok(dest);
@@ -202,15 +200,16 @@ pub async fn get_main_bg_image(app_code: &str) -> Result<String, String> {
     });
 
     let resp_json = batch_proxy_web_post(&body).await?;
-    
+
     let typed: BatchProxyResponse = serde_json::from_value(resp_json)
         .map_err(|e| format!("Failed to deserialize batch response: {}", e))?;
 
     for proxy in typed.proxy_rsps {
         if let Some(bg_rsp) = proxy.get_main_bg_image_rsp
-            && let Some(bg_image) = bg_rsp.main_bg_image {
-                return Ok(bg_image.url);
-            }
+            && let Some(bg_image) = bg_rsp.main_bg_image
+        {
+            return Ok(bg_image.url);
+        }
     }
 
     Err("No background image found in response".to_string())
@@ -218,7 +217,7 @@ pub async fn get_main_bg_image(app_code: &str) -> Result<String, String> {
 
 pub async fn get_games() -> Result<GetGames, String> {
     let app_code = "zePXHT2t4L2tKR4m";
-    
+
     let placeholder_icon = Image {
         url: "https://play-lh.googleusercontent.com/l6FVNa293RykBWy88TqEhUakIcGSC8bRygSnKOBgztln48JX-WzMWnrBAETrKZsxDNC4HhwCsvfle_UI7rBE=w960-h1920-rw".to_string(),
         hover_url: String::new(),
@@ -228,7 +227,8 @@ pub async fn get_games() -> Result<GetGames, String> {
         size: 0,
     };
 
-    let background_url = get_main_bg_image(app_code).await
+    let background_url = get_main_bg_image(app_code)
+        .await
         .unwrap_or_else(|_| String::new());
 
     let placeholder_image = ImageLink {

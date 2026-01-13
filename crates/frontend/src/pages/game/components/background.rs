@@ -2,9 +2,10 @@ use freya::prelude::*;
 use reqwest::Url;
 use std::time::{Duration, Instant};
 
-use crate::components::{MyNetworkImage, VideoBackgroundPlayer};
-use crate::pages::game::video_state::{VideoState, VideoSlot};
 use super::CrossfadeState;
+use crate::components::{MyNetworkImage, VideoBackgroundPlayer};
+use crate::pages::game::video_state::{VideoSlot, VideoState};
+use crate::debug_info;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum TransitionType {
@@ -37,48 +38,59 @@ pub fn BackgroundLayers(
     on_video_ready: EventHandler<()>,
 ) -> Element {
     let mut video_state = use_context::<Signal<VideoState>>();
-    
+
     let fade = use_animation(move |_| {
         AnimNum::new(0.0, 1.0)
             .time(800)
             .ease(Ease::InOut)
             .function(Function::Cubic)
     });
-    
+
     let mut transition = use_signal(|| TransitionType::ImageToImage);
     let mut prev_url = use_signal(|| None::<String>);
     let mut pending_url = use_signal(|| None::<Option<String>>);
     let mut last_change = use_signal(|| Instant::now());
-    
+
     let cooldown = Duration::from_millis(300);
-    
+
+    // Clean up video state when this component is unmounted (when game changes)
+    use_drop(move || {
+        debug_info!("BackgroundLayers unmounting, resetting video state");
+        video_state.write().reset();
+    });
+
     use_effect(use_reactive!(|video_url| {
         let prev = prev_url.read().clone();
-        
+
         if prev.as_ref() == video_url.as_ref() {
             return;
         }
-        
+
+        debug_info!("BackgroundLayers video URL change: {:?} -> {:?}", prev, video_url);
+
         let now = Instant::now();
         let elapsed = now.duration_since(*last_change.read());
-        
+
         let mut vs = video_state.write();
-        
+
         if elapsed < cooldown && vs.is_transitioning() {
+            debug_info!("Video transition pending (in cooldown)");
             pending_url.set(Some(video_url.clone()));
             return;
         }
-        
+
         last_change.set(now);
-        
+
         if vs.is_transitioning() {
+            debug_info!("Video transition pending (already transitioning)");
             pending_url.set(Some(video_url.clone()));
             return;
         }
-        
+
         let trans_type = TransitionType::from_urls(prev.as_ref(), video_url.as_ref());
+        debug_info!("Video transition type: {:?}", trans_type);
         transition.set(trans_type);
-        
+
         match trans_type {
             TransitionType::ImageToVideo | TransitionType::VideoToVideo => {
                 vs.load_next_video(video_url.clone());
@@ -95,7 +107,7 @@ pub fn BackgroundLayers(
                 }
             }
         }
-        
+
         prev_url.set(video_url.clone());
     }));
 
@@ -103,14 +115,17 @@ pub fn BackgroundLayers(
     let inactive_ready = vs.inactive_ready();
     let is_transitioning = vs.is_transitioning();
     drop(vs);
-    
+
     let trans_type = *transition.read();
     let is_animating = fade.is_running();
-    
-    use_effect(use_reactive!(|inactive_ready, is_transitioning, trans_type, is_animating| {
+
+    use_effect(use_reactive!(|inactive_ready,
+                              is_transitioning,
+                              trans_type,
+                              is_animating| {
         if inactive_ready && !is_transitioning {
             let mut vs = video_state.write();
-            
+
             match trans_type {
                 TransitionType::ImageToVideo | TransitionType::VideoToVideo => {
                     if !is_animating {
@@ -121,12 +136,12 @@ pub fn BackgroundLayers(
                 TransitionType::ImageToImage => {
                     let has_primary = vs.primary_url().read().is_some();
                     let has_secondary = vs.secondary_url().read().is_some();
-                    
+
                     if has_primary || has_secondary {
                         if is_animating {
                             fade.start();
                         }
-                        
+
                         transition.set(TransitionType::ImageToVideo);
                         vs.start_transition();
                         fade.start();
@@ -136,7 +151,7 @@ pub fn BackgroundLayers(
             }
         }
     }));
-    
+
     let is_running = fade.is_running();
     let progress = if is_running {
         fade.get().read().read() as f64
@@ -153,10 +168,10 @@ pub fn BackgroundLayers(
     use_effect(use_reactive!(|is_running| {
         if !is_running {
             let mut vs = video_state.write();
-            
+
             if vs.is_transitioning() {
                 let trans_type = *transition.read();
-                
+
                 match trans_type {
                     TransitionType::ImageToVideo | TransitionType::VideoToVideo => {
                         vs.swap_and_clear();
@@ -167,23 +182,24 @@ pub fn BackgroundLayers(
                     }
                     _ => {}
                 }
-                
+
                 drop(vs);
 
                 let pending = pending_url.read().clone();
                 if let Some(pending_url_val) = pending {
                     let now = Instant::now();
                     let elapsed = now.duration_since(*last_change.read());
-                    
+
                     if elapsed >= cooldown {
                         pending_url.set(None);
-                        
+
                         let prev = prev_url.read().clone();
-                        let trans_type = TransitionType::from_urls(prev.as_ref(), pending_url_val.as_ref());
+                        let trans_type =
+                            TransitionType::from_urls(prev.as_ref(), pending_url_val.as_ref());
                         transition.set(trans_type);
-                        
+
                         let mut vs = video_state.write();
-                        
+
                         match trans_type {
                             TransitionType::ImageToVideo | TransitionType::VideoToVideo => {
                                 vs.load_next_video(pending_url_val.clone());
@@ -198,7 +214,7 @@ pub fn BackgroundLayers(
                                 }
                             }
                         }
-                        
+
                         prev_url.set(pending_url_val);
                         last_change.set(now);
                     }
@@ -211,6 +227,7 @@ pub fn BackgroundLayers(
     let trans_type = *transition.read();
     let active_slot = *vs.active_slot.read();
     let has_active_video = vs.active_url().is_some() && vs.active_ready();
+    let is_paused = vs.is_paused();
 
     let (primary_opacity, secondary_opacity, video_layer_opacity) = if is_running {
         let layer_opacity = match trans_type {
@@ -219,27 +236,27 @@ pub fn BackgroundLayers(
             TransitionType::VideoToVideo => 1.0,
             TransitionType::ImageToImage => 0.0,
         };
-        
+
         (
             *vs.primary_opacity().read(),
             *vs.secondary_opacity().read(),
             layer_opacity,
         )
     } else {
-        let opacity = if has_active_video { 1.0 } else { 0.0 };
-        
+        let opacity = if has_active_video && !is_paused { 1.0 } else { 0.0 };
+
         let (primary_op, secondary_op) = match active_slot {
             VideoSlot::Primary => (1.0, 0.0),
             VideoSlot::Secondary => (0.0, 1.0),
         };
-        
+
         (primary_op, secondary_op, opacity)
     };
-    
-    let primary_url = vs.primary_url().read().clone();
-    let secondary_url = vs.secondary_url().read().clone();
+
+    let primary_url = if !is_paused { vs.primary_url().read().clone() } else { None };
+    let secondary_url = if !is_paused { vs.secondary_url().read().clone() } else { None };
     drop(vs);
-    
+
     rsx! {
         rect {
             position: "absolute",

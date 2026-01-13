@@ -24,7 +24,16 @@ impl ProgressTracker {
         }
     }
 
-    pub fn report(&self, key: &str, component_name: &str, downloaded: u64, total: u64, is_busy: bool, step_index: Option<usize>, total_steps: Option<usize>) {
+    pub fn report(
+        &self,
+        key: &str,
+        component_name: &str,
+        downloaded: u64,
+        total: u64,
+        is_busy: bool,
+        step_index: Option<usize>,
+        total_steps: Option<usize>,
+    ) {
         let progress = ComponentProgress {
             component_name: component_name.to_string(),
             downloaded,
@@ -34,7 +43,7 @@ impl ProgressTracker {
             step_index,
             total_steps,
         };
-        
+
         let mut map = self.progress.write().unwrap();
         map.insert(key.to_string(), progress);
     }
