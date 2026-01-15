@@ -37,7 +37,7 @@ impl TweakManifest {
         
         // Endfield
         game_configs.insert(
-            "zePXHT2t4L4m".to_string(),
+            "zePXHT2t4L2tKR4m".to_string(),
             GameConfiguration {
                 tweaks: vec![TweakType::Jadeite],
                 setup_commands: vec![],
