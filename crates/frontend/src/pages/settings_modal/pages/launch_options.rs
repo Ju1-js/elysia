@@ -1,5 +1,5 @@
 use crate::pages::settings_modal::components::{ToggleOption, check_command_exists};
-use crate::pages::settings_modal::styles::*;
+use crate::pages::settings_modal::styles::TEXT_SECONDARY;
 use freya::prelude::*;
 
 /// Launch options settings page

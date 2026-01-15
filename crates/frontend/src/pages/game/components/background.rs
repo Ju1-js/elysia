@@ -49,7 +49,7 @@ pub fn BackgroundLayers(
     let mut transition = use_signal(|| TransitionType::ImageToImage);
     let mut prev_url = use_signal(|| None::<String>);
     let mut pending_url = use_signal(|| None::<Option<String>>);
-    let mut last_change = use_signal(|| Instant::now());
+    let mut last_change = use_signal(Instant::now);
 
     let cooldown = Duration::from_millis(300);
 
@@ -147,14 +147,14 @@ pub fn BackgroundLayers(
                         fade.start();
                     }
                 }
-                _ => {}
+                TransitionType::VideoToImage => {}
             }
         }
     }));
 
     let is_running = fade.is_running();
     let progress = if is_running {
-        fade.get().read().read() as f64
+        f64::from(fade.get().read().read())
     } else {
         0.0
     };
@@ -180,7 +180,7 @@ pub fn BackgroundLayers(
                     TransitionType::VideoToImage => {
                         vs.reset();
                     }
-                    _ => {}
+                    TransitionType::ImageToImage => {}
                 }
 
                 drop(vs);
@@ -253,8 +253,8 @@ pub fn BackgroundLayers(
         (primary_op, secondary_op, opacity)
     };
 
-    let primary_url = if !is_paused { vs.primary_url().read().clone() } else { None };
-    let secondary_url = if !is_paused { vs.secondary_url().read().clone() } else { None };
+    let primary_url = if is_paused { None } else { vs.primary_url().read().clone() };
+    let secondary_url = if is_paused { None } else { vs.secondary_url().read().clone() };
     drop(vs);
 
     rsx! {
@@ -340,7 +340,7 @@ pub fn BackgroundLayers(
                 VideoBackgroundPlayer {
                     key: "{video_primary}",
                     video_url: video_primary,
-                    on_ready: move |_| {
+                    on_ready: move |()| {
                         let mut vs = video_state.write();
                         vs.mark_ready(VideoSlot::Primary);
                         if active_slot == VideoSlot::Primary {
@@ -366,7 +366,7 @@ pub fn BackgroundLayers(
                 VideoBackgroundPlayer {
                     key: "{video_secondary}",
                     video_url: video_secondary,
-                    on_ready: move |_| {
+                    on_ready: move |()| {
                         let mut vs = video_state.write();
                         vs.mark_ready(VideoSlot::Secondary);
                         if active_slot == VideoSlot::Secondary {

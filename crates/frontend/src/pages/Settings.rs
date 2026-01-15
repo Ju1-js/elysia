@@ -18,7 +18,7 @@ pub fn Settings() -> Element {
             
             // Settings modal overlay
             GeneralSettingsModal {
-                on_close: move |_| {
+                on_close: move |()| {
                     // Navigate back when settings are closed
                     navigator.go_back();
                 },

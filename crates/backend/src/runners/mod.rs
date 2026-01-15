@@ -11,15 +11,19 @@ pub use crate::runners::{proton::Proton, wine::Wine};
 use crate::settings::{GlobalSettings, InstalledGame};
 
 pub trait Runner {
+    /// # Errors
+    /// Returns an error if the game cannot be started.
     fn run_game(&self, settings: &GlobalSettings, game: &InstalledGame) -> Result<std::process::Child, String>;
 }
 
 /// Kill a Wine/Proton process using wineserver
 /// 
 /// This is a common utility used by both Wine and Proton runners
+/// # Errors
+/// Returns an error if wineserver cannot be executed.
 pub fn kill_wineserver(wineserver_path: &std::path::Path, prefix_path: &str) -> Result<()> {
     if !wineserver_path.exists() {
-        return Err(anyhow::anyhow!("wineserver not found at {:?}", wineserver_path));
+        return Err(anyhow::anyhow!("wineserver not found at {}", wineserver_path.display()));
     }
 
     let status = Command::new(wineserver_path)
@@ -62,14 +66,17 @@ impl Runner for Runners {
 }
 
 impl Runners {
+    #[must_use] 
     pub fn is_proton(&self) -> bool {
         matches!(self, Runners::Proton(_))
     }
 
+    #[must_use] 
     pub fn is_wine(&self) -> bool {
         matches!(self, Runners::Wine(_))
     }
 
+    #[must_use] 
     pub fn is_native(&self) -> bool {
         matches!(self, Runners::Native)
     }
@@ -143,6 +150,8 @@ impl Runners {
         Some((installed, installed_version, available_versions))
     }
 
+    /// # Errors
+    /// Returns an error if download fails.
     pub async fn download_proton(
         settings: &GlobalSettings,
         component_manager: &mut ComponentManager,
@@ -153,9 +162,7 @@ impl Runners {
         let _ = component_manager.refresh_component(ComponentType::Proton).await;
 
         let display_name = component_manager
-            .get_latest_version(ComponentType::Proton)
-            .map(|v| v.display_name.clone())
-            .unwrap_or_else(|| "Proton".to_string());
+            .get_latest_version(ComponentType::Proton).map_or_else(|| "Proton".to_string(), |v| v.display_name.clone());
 
         component_manager
             .download_component(
@@ -167,7 +174,13 @@ impl Runners {
                     let key = progress_key.to_string();
                     let name = display_name.clone();
                     Box::new(move |current, total| {
-                        pt.report(&key, &name, current, total, true, None, None);
+                        pt.report(&key, &name, crate::progress::ReportParams {
+                            downloaded: current,
+                            total,
+                            is_busy: true,
+                            step_index: None,
+                            total_steps: None,
+                        });
                     }) as Box<dyn Fn(u64, u64) + Send>
                 }),
             )
@@ -180,6 +193,8 @@ impl Runners {
         Ok(())
     }
 
+    /// # Errors
+    /// Returns an error if download fails.
     pub async fn download_wine(
         settings: &GlobalSettings,
         component_manager: &ComponentManager,
@@ -188,9 +203,7 @@ impl Runners {
         progress_key: &str,
     ) -> Result<()> {
         let display_name = component_manager
-            .get_latest_version(ComponentType::Wine)
-            .map(|v| v.display_name.clone())
-            .unwrap_or_else(|| "Wine".to_string());
+            .get_latest_version(ComponentType::Wine).map_or_else(|| "Wine".to_string(), |v| v.display_name.clone());
 
         component_manager
             .download_component(
@@ -202,7 +215,13 @@ impl Runners {
                     let key = progress_key.to_string();
                     let name = display_name.clone();
                     Box::new(move |current, total| {
-                        pt.report(&key, &name, current, total, true, None, None);
+                        pt.report(&key, &name, crate::progress::ReportParams {
+                            downloaded: current,
+                            total,
+                            is_busy: true,
+                            step_index: None,
+                            total_steps: None,
+                        });
                     }) as Box<dyn Fn(u64, u64) + Send>
                 }),
             )
@@ -215,6 +234,8 @@ impl Runners {
         Ok(())
     }
 
+    /// # Errors
+    /// Returns an error if download fails.
     pub async fn download_proton_runtime(
         settings: &GlobalSettings,
         component_manager: &mut ComponentManager,
@@ -230,6 +251,8 @@ impl Runners {
         .await
     }
 
+    /// # Errors
+    /// Returns an error if download fails.
     pub async fn download_dxvk(
         settings: &GlobalSettings,
         component_manager: &ComponentManager,
@@ -238,9 +261,7 @@ impl Runners {
         progress_key: &str,
     ) -> Result<()> {
         let display_name = component_manager
-            .get_latest_version(ComponentType::Dxvk)
-            .map(|v| v.display_name.clone())
-            .unwrap_or_else(|| "DXVK".to_string());
+            .get_latest_version(ComponentType::Dxvk).map_or_else(|| "DXVK".to_string(), |v| v.display_name.clone());
 
         component_manager
             .download_component(
@@ -252,7 +273,13 @@ impl Runners {
                     let key = progress_key.to_string();
                     let name = display_name.clone();
                     Box::new(move |current, total| {
-                        pt.report(&key, &name, current, total, true, None, None);
+                        pt.report(&key, &name, crate::progress::ReportParams {
+                            downloaded: current,
+                            total,
+                            is_busy: true,
+                            step_index: None,
+                            total_steps: None,
+                        });
                     }) as Box<dyn Fn(u64, u64) + Send>
                 }),
             )

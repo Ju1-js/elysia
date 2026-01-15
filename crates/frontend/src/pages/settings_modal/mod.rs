@@ -92,8 +92,10 @@ pub fn SettingsModal(
                 return;
             };
 
-            let settings = settings_sig.read();
-            let settings_data = settings.read().unwrap();
+            let settings_data = {
+                let settings = settings_sig.read();
+                settings.read().unwrap().clone()
+            };
 
             // Get currently selected versions to check if they're installed
             let current_wine = selected_wine.read().clone();
@@ -108,10 +110,10 @@ pub fn SettingsModal(
                 proton_versions.set(version_infos.clone());
                 // Only auto-select if there's NO saved version (truly empty from fresh settings)
                 // Do NOT overwrite existing saved versions
-                if current_proton.is_empty() && !version_infos.is_empty() {
-                    if let Some(first) = version_infos.first() {
-                        selected_proton.set(first.internal_name.clone());
-                    }
+                if current_proton.is_empty() && !version_infos.is_empty()
+                    && let Some(first) = version_infos.first()
+                {
+                    selected_proton.set(first.internal_name.clone());
                 }
             }
 
@@ -122,10 +124,10 @@ pub fn SettingsModal(
                 wine_installed.set(installed);
                 wine_versions.set(version_infos.clone());
                 // Only auto-select if there's NO saved version
-                if current_wine.is_empty() && !version_infos.is_empty() {
-                    if let Some(first) = version_infos.first() {
-                        selected_wine.set(first.internal_name.clone());
-                    }
+                if current_wine.is_empty() && !version_infos.is_empty()
+                    && let Some(first) = version_infos.first()
+                {
+                    selected_wine.set(first.internal_name.clone());
                 }
             }
 
@@ -138,10 +140,10 @@ pub fn SettingsModal(
                 // Only set first version if no version was loaded from settings
                 // Always auto-select when empty, regardless of current runner, because
                 // the dropdown will be used if user switches to Wine runner
-                if current_dxvk.is_empty() && !version_infos.is_empty() {
-                    if let Some(first) = version_infos.first() {
-                        selected_dxvk.set(first.internal_name.clone());
-                    }
+                if current_dxvk.is_empty() && !version_infos.is_empty()
+                    && let Some(first) = version_infos.first()
+                {
+                    selected_dxvk.set(first.internal_name.clone());
                 }
             }
 
@@ -180,10 +182,10 @@ pub fn SettingsModal(
         spawn(async move {
             // Check if the selected Proton version is installed
             let proton_path = components_dir.join("proton").join(&selected);
-            let is_installed = if !selected.is_empty() {
-                proton_path.exists()
-            } else {
+            let is_installed = if selected.is_empty() {
                 false
+            } else {
+                proton_path.exists()
             };
             proton_installed.set(is_installed);
         });
@@ -198,10 +200,10 @@ pub fn SettingsModal(
         spawn(async move {
             // Check if the selected DXVK version is installed
             let dxvk_path = components_dir.join("dxvk").join(&selected);
-            let is_installed = if !selected.is_empty() {
-                dxvk_path.exists()
-            } else {
+            let is_installed = if selected.is_empty() {
                 false
+            } else {
+                dxvk_path.exists()
             };
             dxvk_installed.set(is_installed);
         });
@@ -225,10 +227,8 @@ pub fn SettingsModal(
                         },
                         is_active: progress.is_busy,
                     }));
-                } else {
-                    if progress_signal.read().is_some() {
-                        progress_signal.set(None);
-                    }
+                } else if progress_signal.read().is_some() {
+                    progress_signal.set(None);
                 }
 
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -285,17 +285,19 @@ pub fn SettingsModal(
         // Call save synchronously instead of spawning async task
         // This ensures the save completes before the modal closes
         save_settings_to_disk_sync(
-            settings_arc,
+            &settings_arc,
             context_clone,
-            runner_type,
-            wine_ver,
-            proton_ver,
-            dxvk_ver,
-            wrapper_val,
-            winewayland,
-            mangohud,
-            gamemode,
-            disable_videos_val,
+            SaveSettingsParams {
+                runner_type,
+                wine_ver,
+                proton_ver,
+                dxvk_ver,
+                wrapper_val,
+                winewayland,
+                mangohud,
+                gamemode,
+                disable_videos: disable_videos_val,
+            },
         );
     });
 
@@ -592,7 +594,7 @@ fn load_initial_settings(
     }
 }
 
-/// Load values from GamePreferences
+/// Load values from `GamePreferences`
 fn load_preferences_values(
     prefs: &backend::settings::GamePreferences,
 ) -> (RunnerType, String, String, String, String, bool, bool, bool, bool) {
@@ -632,7 +634,7 @@ fn load_preferences_values(
     )
 }
 
-/// Load values from InstalledGame
+/// Load values from `InstalledGame`
 fn load_game_values(
     game: &backend::settings::InstalledGame,
 ) -> (RunnerType, String, String, String, String, bool, bool, bool, bool) {
@@ -674,10 +676,8 @@ fn load_game_values(
     )
 }
 
-/// Save settings to disk based on context
-fn save_settings_to_disk_sync(
-    settings_arc: Arc<RwLock<GlobalSettings>>,
-    context: SettingsContext,
+#[allow(clippy::struct_excessive_bools)]
+struct SaveSettingsParams {
     runner_type: RunnerType,
     wine_ver: String,
     proton_ver: String,
@@ -687,35 +687,42 @@ fn save_settings_to_disk_sync(
     mangohud: bool,
     gamemode: bool,
     disable_videos: bool,
+}
+
+/// Save settings to disk based on context
+fn save_settings_to_disk_sync(
+    settings_arc: &Arc<RwLock<GlobalSettings>>,
+    context: SettingsContext,
+    params: SaveSettingsParams,
 ) {
     if let Ok(mut settings) = settings_arc.write() {
         // Create runner based on selected type
-        let runner = match runner_type {
+        let runner = match params.runner_type {
             RunnerType::Wine => {
-                let version = wine_ver.clone();
+                let version = params.wine_ver.clone();
                 Runners::Wine(backend::runners::Wine { version })
             }
             RunnerType::Proton => {
-                let version = proton_ver.clone();
+                let version = params.proton_ver.clone();
                 Runners::Proton(backend::runners::Proton { version })
             }
         };
 
         // Create runtime components list for DXVK
         let mut runtime_components = Vec::new();
-        if matches!(runner_type, RunnerType::Wine) && !dxvk_ver.is_empty() {
-            runtime_components.push(backend::settings::RuntimeComponents::Dxvk(dxvk_ver.clone()));
+        if matches!(params.runner_type, RunnerType::Wine) && !params.dxvk_ver.is_empty() {
+            runtime_components.push(backend::settings::RuntimeComponents::Dxvk(params.dxvk_ver.clone()));
         }
 
         // Prepare command_wrapper
-        let command_wrapper = if wrapper_val.is_empty() {
+        let command_wrapper = if params.wrapper_val.is_empty() {
             None
         } else {
-            Some(wrapper_val)
+            Some(params.wrapper_val)
         };
 
         // Update disable_videos in GlobalSettings (applies to both general and game-specific)
-        settings.disable_videos = disable_videos;
+        settings.disable_videos = params.disable_videos;
 
         match context {
             SettingsContext::General => {
@@ -724,9 +731,9 @@ fn save_settings_to_disk_sync(
                     runner: runner.clone(),
                     runtime_components,
                     command_wrapper,
-                    enable_winewayland: winewayland,
-                    enable_mangohud: mangohud,
-                    enable_gamemode: gamemode,
+                    enable_winewayland: params.winewayland,
+                    enable_mangohud: params.mangohud,
+                    enable_gamemode: params.gamemode,
                 };
 
                 debug_info!("Saving default preferences - runner: {:?}", runner);
@@ -735,11 +742,11 @@ fn save_settings_to_disk_sync(
                 // Save to installed game if it exists
                 if let Some(game) = settings.installed_games.get_mut(&game_id) {
                     game.runner = runner.clone();
-                    game.runtime_components = runtime_components.clone();
-                    game.command_wrapper = command_wrapper.clone();
-                    game.enable_winewayland = winewayland;
-                    game.enable_mangohud = mangohud;
-                    game.enable_gamemode = gamemode;
+                    game.runtime_components.clone_from(&runtime_components);
+                    game.command_wrapper.clone_from(&command_wrapper);
+                    game.enable_winewayland = params.winewayland;
+                    game.enable_mangohud = params.mangohud;
+                    game.enable_gamemode = params.gamemode;
                 }
 
                 // Always save to game_preferences (even for uninstalled games)
@@ -749,9 +756,9 @@ fn save_settings_to_disk_sync(
                         runner,
                         runtime_components,
                         command_wrapper,
-                        enable_winewayland: winewayland,
-                        enable_mangohud: mangohud,
-                        enable_gamemode: gamemode,
+                        enable_winewayland: params.winewayland,
+                        enable_mangohud: params.mangohud,
+                        enable_gamemode: params.gamemode,
                     },
                 );
 
@@ -760,8 +767,8 @@ fn save_settings_to_disk_sync(
         }
 
         // Save to disk
-        if let Err(_e) = settings.save() {
-            debug_error!("Failed to save settings: {}", _e);
+        if let Err(e) = settings.save() {
+            debug_error!("Failed to save settings: {}", e);
         }
     } else {
         debug_error!(

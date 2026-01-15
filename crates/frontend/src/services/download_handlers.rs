@@ -10,6 +10,7 @@ use crate::{debug_error, debug_info};
 pub struct ComponentDownloadResult {
     pub success: bool,
     pub installed: bool,
+    #[allow(dead_code)]
     pub error_message: Option<String>,
 }
 
@@ -49,35 +50,7 @@ pub async fn download_component(
 
     let manager_arc = service.manager();
 
-    let mut component_manager = match manager_arc.try_write() {
-        Ok(manager) => manager,
-        Err(_) => {
-            debug_error!(
-                "ComponentManager is busy (download in progress). Please wait and try again."
-            );
-            progress_signal.set(Some(ComponentDownloadProgress {
-                component_name: params.component_display_name.clone(),
-                downloaded: 0,
-                total: 0,
-                status: "ComponentManager is busy. Please wait for current download to finish."
-                    .to_string(),
-                is_active: false,
-            }));
-            is_downloading_signal.set(false);
-
-            // Clear the message after a delay
-            spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                progress_signal.set(None);
-            });
-
-            return ComponentDownloadResult {
-                success: false,
-                installed: false,
-                error_message: Some("ComponentManager is busy".to_string()),
-            };
-        }
-    };
+    let mut component_manager = manager_arc.write().await;
 
     debug_info!(
         "Refreshing {} component cache before download...",
@@ -113,11 +86,13 @@ pub async fn download_component(
                 tracker_clone.report(
                     "component_download",
                     &version_for_callback,
-                    downloaded,
-                    total,
-                    true,
-                    None,
-                    None,
+                    backend::progress::ReportParams {
+                        downloaded,
+                        total,
+                        is_busy: true,
+                        step_index: None,
+                        total_steps: None,
+                    },
                 );
             })),
         )

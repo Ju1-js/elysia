@@ -6,7 +6,7 @@ pub use wine_section::WineSection;
 
 use crate::components::ComponentDownloadProgress;
 use crate::pages::settings_modal::components::{RunnerToggleButton, StylizedDropdown};
-use crate::pages::settings_modal::styles::*;
+use crate::pages::settings_modal::styles::{TEXT_SECONDARY, INTERACTIVE_BORDER};
 use crate::pages::settings_modal::types::{ComponentVersionInfo, RunnerType};
 use backend::settings::GlobalSettings;
 use freya::prelude::*;

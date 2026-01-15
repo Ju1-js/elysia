@@ -18,6 +18,7 @@ pub enum SetupStep {
     DownloadSteamRuntime,
     DownloadProton,
     DownloadJadeite,
+    #[allow(dead_code)]
     Complete,
 }
 

@@ -15,8 +15,8 @@ pub fn GameSettingsModal(on_close: EventHandler<()>, game_name: String, scale: f
         SettingsModal {
             on_close: on_close,
             context: SettingsContext::Game {
-                game_id: game_id,
-                game_name: game_name,
+                game_id,
+                game_name,
             },
             scale: scale,
         }

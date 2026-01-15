@@ -78,6 +78,7 @@ pub struct GetGameContent {
     pub content: Content,
 }
 
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LaunchConfig {
     pub game: GameInfo,

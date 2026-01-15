@@ -30,6 +30,7 @@ pub struct TweakManifest {
 }
 
 impl TweakManifest {
+    #[must_use] 
     pub fn new() -> Self {
         let mut game_configs = HashMap::new();
 
@@ -44,10 +45,12 @@ impl TweakManifest {
         Self { game_configs }
     }
 
+    #[must_use] 
     pub fn get_config(&self, game_id: &str) -> Option<&GameConfiguration> {
         self.game_configs.get(game_id)
     }
 
+    #[must_use] 
     pub fn get_tweaks(&self, game_id: &str) -> Vec<TweakType> {
         self.game_configs
             .get(game_id)
@@ -55,6 +58,7 @@ impl TweakManifest {
             .unwrap_or_default()
     }
 
+    #[must_use] 
     pub fn get_setup_commands(&self, game_id: &str) -> Vec<SetupCommand> {
         self.game_configs
             .get(game_id)
@@ -62,17 +66,19 @@ impl TweakManifest {
             .unwrap_or_default()
     }
 
+    #[must_use] 
     pub fn needs_tweak(&self, game_id: &str, tweak_type: &TweakType) -> bool {
         self.game_configs
             .get(game_id)
-            .map(|config| config.tweaks.contains(tweak_type))
-            .unwrap_or(false)
+            .is_some_and(|config| config.tweaks.contains(tweak_type))
     }
 
+    #[must_use] 
     pub fn needs_jadeite(&self, game_id: &str) -> bool {
         self.needs_tweak(game_id, &TweakType::Jadeite)
     }
 
+    #[must_use] 
     pub fn needs_first_time_setup(&self, game_id: &str) -> bool {
         !self.get_setup_commands(game_id).is_empty()
     }

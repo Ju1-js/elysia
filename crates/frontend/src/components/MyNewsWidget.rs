@@ -11,7 +11,7 @@ pub fn MyNewsWidget(game_id: String) -> Element {
     let game_state = use_context::<crate::pages::game::state::GlobalGameStateSignal>();
 
     let mut carousel_index = use_signal(|| 0usize);
-    let mut last_interaction = use_signal(|| std::time::Instant::now());
+    let mut last_interaction = use_signal(std::time::Instant::now);
 
     let Some(content) = ctx.api_news.get(&game_id).cloned() else {
         return rsx!({});
@@ -83,7 +83,7 @@ pub fn MyNewsWidget(game_id: String) -> Element {
                             }
                         }).collect(),
                         selected: carousel_index,
-                        on_manual_change: move |_| {
+                        on_manual_change: move |()| {
                             last_interaction.set(std::time::Instant::now());
                         }
                     }

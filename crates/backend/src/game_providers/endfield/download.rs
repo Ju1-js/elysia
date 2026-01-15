@@ -1,3 +1,5 @@
+#![allow(clippy::non_std_lazy_statics)]
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -30,6 +32,7 @@ lazy_static! {
     static ref PROGRESS_MAP: Mutex<HashMap<String, Progress>> = Mutex::new(HashMap::new());
 }
 
+#[must_use] 
 pub fn get_progress(key: &str) -> Option<Progress> {
     PROGRESS_MAP
         .lock()
@@ -97,7 +100,15 @@ impl StreamArchive {
     }
 
     fn part_sizes(&self) -> Vec<usize> {
-        self.packs.iter().map(|p| p.size as usize).collect()
+        self.packs
+            .iter()
+            .map(|p| {
+                p.size.try_into().unwrap_or_else(|_| {
+                    eprintln!("[WARN] Pack size {} exceeds usize::MAX, clamping to usize::MAX", p.size);
+                    usize::MAX
+                })
+            })
+            .collect()
     }
 
     async fn verify_last_part_size(&self, mut sizes: Vec<usize>) -> Result<Vec<usize>> {
@@ -135,7 +146,7 @@ impl StreamArchive {
         move |pos: ZipPosition, len: usize| -> Result<Vec<u8>> {
             let disk = pos.disk;
             if disk >= self.packs.len() {
-                return Err(anyhow!("invalid disk index: {}", disk));
+                return Err(anyhow!("invalid disk index: {disk}"));
             }
 
             let url = &self.packs[disk].url;
@@ -150,7 +161,7 @@ impl StreamArchive {
                         .send()
                         .await
                         .with_context(|| {
-                            format!("requesting range from part {} ({})", disk, url)
+                            format!("requesting range from part {disk} ({url})")
                         })?;
 
                     if !resp.status().is_success() {
@@ -190,10 +201,19 @@ impl StreamArchive {
             return Ok(None);
         }
 
-        let disk = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
-        let offset = u64::from_le_bytes([
+        let disk_u32 = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+        let offset_u64 = u64::from_le_bytes([
             data[4], data[5], data[6], data[7], data[8], data[9], data[10], data[11],
-        ]) as usize;
+        ]);
+
+        let disk = disk_u32.try_into().unwrap_or_else(|_| {
+            eprintln!("[WARN] Disk index {disk_u32} exceeds usize::MAX, clamping");
+            usize::MAX
+        });
+        let offset = offset_u64.try_into().unwrap_or_else(|_| {
+            eprintln!("[WARN] Offset {offset_u64} exceeds usize::MAX, clamping");
+            usize::MAX
+        });
 
         Ok(Some(ZipPosition::new(disk, offset)))
     }
@@ -217,7 +237,7 @@ impl StreamArchive {
                     tokio::task::block_in_place(|| -> Result<()> {
                         let mut file_to_flush = current_file_clone
                             .lock()
-                            .map_err(|e| anyhow!("mutex poisoned: {}", e))?
+                            .map_err(|e| anyhow!("mutex poisoned: {e}"))?
                             .take();
 
                         if let Some(ref mut f) = file_to_flush {
@@ -229,28 +249,38 @@ impl StreamArchive {
 
                         if name.ends_with('/') || name.ends_with('\\') {
                             std::fs::create_dir_all(&path).with_context(|| {
-                                format!("failed to create directory: {:?}", path)
+                                format!("failed to create directory: {}", path.display())
                             })?;
                             return Ok(());
                         }
 
                         if let Some(parent) = path.parent() {
                             std::fs::create_dir_all(parent).with_context(|| {
-                                format!("failed to create parent directory: {:?}", parent)
+                                format!("failed to create parent directory: {}", parent.display())
                             })?;
                         }
 
                         let new_file = std::fs::File::create(&path)
-                            .with_context(|| format!("failed to create file: {:?}", path))?;
+                            .with_context(|| format!("failed to create file: {}", path.display()))?;
 
                         *current_file_clone
                             .lock()
-                            .map_err(|e| anyhow!("mutex poisoned: {}", e))? = Some(new_file);
+                            .map_err(|e| anyhow!("mutex poisoned: {e}"))? = Some(new_file);
 
                         let pos = cdfh.header_position();
                         let mut state = Vec::with_capacity(12);
-                        state.extend_from_slice(&(pos.disk as u32).to_le_bytes());
-                        state.extend_from_slice(&(pos.offset as u64).to_le_bytes());
+                        
+                        let disk_u32: u32 = pos.disk.try_into().unwrap_or_else(|_| {
+                            eprintln!("[WARN] Disk index {} exceeds u32::MAX, clamping", pos.disk);
+                            u32::MAX
+                        });
+                        let offset_u64: u64 = pos.offset.try_into().unwrap_or_else(|_| {
+                            eprintln!("[WARN] Offset {} exceeds u64::MAX, clamping", pos.offset);
+                            u64::MAX
+                        });
+                        
+                        state.extend_from_slice(&disk_u32.to_le_bytes());
+                        state.extend_from_slice(&offset_u64.to_le_bytes());
                         let _ = std::fs::write(&*status_path_clone, state);
 
                         Ok(())
@@ -260,7 +290,7 @@ impl StreamArchive {
                     tokio::task::block_in_place(|| -> Result<()> {
                         let mut guard = current_file_clone
                             .lock()
-                            .map_err(|e| anyhow!("mutex poisoned: {}", e))?;
+                            .map_err(|e| anyhow!("mutex poisoned: {e}"))?;
 
                         if let Some(f) = guard.as_mut() {
                             std::io::Write::write_all(f, data)
@@ -285,17 +315,17 @@ impl StreamArchive {
 
         tokio::task::spawn_blocking(move || {
             let digest = context.finalize();
-            let actual = format!("{:x}", digest);
-            if !actual.eq_ignore_ascii_case(&expected) {
+            let actual = format!("{digest:x}");
+            if actual.eq_ignore_ascii_case(&expected) {
+                eprintln!("[MD5] Part {} verified successfully", part_idx + 1);
+                Ok(())
+            } else {
                 Err(anyhow!(
                     "MD5 verification failed for part {}: expected {}, got {}",
                     part_idx + 1,
                     expected,
                     actual
                 ))
-            } else {
-                eprintln!("[MD5] Part {} verified successfully", part_idx + 1);
-                Ok(())
             }
         })
         .await?
@@ -324,7 +354,7 @@ impl StreamArchive {
         loop {
             let (consumed, is_done) = unpacker
                 .update(&*buffer)
-                .map_err(|e| anyhow!("unpacker error: {:?}", e))?;
+                .map_err(|e| anyhow!("unpacker error: {e:?}"))?;
 
             if consumed > 0 {
                 buffer.drain(..consumed);
@@ -355,6 +385,7 @@ impl StreamArchive {
         );
     }
 
+    #[allow(clippy::too_many_lines)]
     pub async fn stream_unpack(&self) -> Result<()> {
         let total = self.total_size();
 
@@ -403,7 +434,7 @@ impl StreamArchive {
             let mut request = self.client.get(&pack.url);
 
             if part_idx == start_part && start_offset > 0 {
-                request = request.header(RANGE, format!("bytes={}-", start_offset));
+                request = request.header(RANGE, format!("bytes={start_offset}-"));
             }
 
             let resp = request
@@ -431,6 +462,7 @@ impl StreamArchive {
                 let now = Instant::now();
                 if now.duration_since(last_update) >= Duration::from_secs(1) {
                     let diff = total_downloaded - last_bytes;
+                    #[allow(clippy::cast_precision_loss)]
                     let mb_s = diff as f32 / (1024.0 * 1024.0);
                     last_bytes = total_downloaded;
                     last_update = now;
@@ -509,7 +541,7 @@ pub async fn download_and_extract_streaming(
 ) -> Result<(), String> {
     let archive = StreamArchive::from_packs(packs, dest, progress_key)
         .await
-        .map_err(|e| format!("initialization error: {}", e))?;
+        .map_err(|e| format!("initialization error: {e}"))?;
 
     let res = archive.stream_unpack().await;
 
@@ -522,16 +554,16 @@ pub async fn download_and_extract_streaming(
 
         let marker_path = dest.join(".elysia_installed");
         let json = serde_json::to_string_pretty(&manifest)
-            .map_err(|e| format!("Failed to serialize installation marker: {}", e))?;
+            .map_err(|e| format!("Failed to serialize installation marker: {e}"))?;
 
         tokio::fs::write(&marker_path, json)
             .await
-            .map_err(|e| format!("Failed to write installation marker: {}", e))?;
+            .map_err(|e| format!("Failed to write installation marker: {e}"))?;
 
-        eprintln!("[INFO] Created installation marker at {:?}", marker_path);
+        eprintln!("[INFO] Created installation marker at {}", marker_path.display());
     } else {
         clear_progress(progress_key);
     }
 
-    res.map_err(|e| format!("download/extraction error: {}", e))
+    res.map_err(|e| format!("download/extraction error: {e}"))
 }

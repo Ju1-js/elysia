@@ -4,7 +4,7 @@ use freya::prelude::*;
 /// Sidebar item component with hover effects
 #[component]
 pub fn MySidebarItem(
-    /// Inner content for the SidebarItem.
+    /// Inner content for the `SidebarItem`.
     children: Element,
     /// Whether this sidebar item is currently active.
     #[props(default = false)]

@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -22,6 +23,9 @@ fn is_steamrt_complete(version_dir: &Path) -> bool {
     version_dir.join(".elysia_steamrt_installed").exists()
 }
 
+/// # Errors
+/// Returns an error if the Steam Runtime setup cannot be prepared.
+#[allow(clippy::unused_async)]
 pub async fn prepare_steamrt(settings: &GlobalSettings) -> Result<SteamRtSetup> {
     let steamrt_dir = settings.components_directory.join("steamrt");
     let version_dir = steamrt_dir.join(STEAMRT_VERSION);
@@ -55,17 +59,21 @@ pub async fn prepare_steamrt(settings: &GlobalSettings) -> Result<SteamRtSetup> 
     })
 }
 
+#[must_use] 
 pub fn get_download_url() -> String {
     format!(
-        "{}/{}/{}",
-        STEAMRT_BASE_URL, STEAMRT_VERSION, STEAMRT_TARBALL
+        "{STEAMRT_BASE_URL}/{STEAMRT_VERSION}/{STEAMRT_TARBALL}"
     )
 }
 
+#[must_use] 
 pub fn get_checksum_url() -> String {
-    format!("{}/{}/SHA256SUMS", STEAMRT_BASE_URL, STEAMRT_VERSION)
+    format!("{STEAMRT_BASE_URL}/{STEAMRT_VERSION}/SHA256SUMS")
 }
 
+/// # Errors
+/// Returns an error if the download or extraction fails.
+#[allow(clippy::too_many_lines)]
 pub async fn download_steamrt(
     settings: &GlobalSettings,
     progress_callback: Option<Box<dyn Fn(u64, u64) + Send>>,
@@ -74,7 +82,7 @@ pub async fn download_steamrt(
     let version_dir = steamrt_dir.join(STEAMRT_VERSION);
 
     if version_dir.exists() && is_steamrt_complete(&version_dir) {
-        println!("Steam Runtime {} already exists", STEAMRT_VERSION);
+        println!("Steam Runtime {STEAMRT_VERSION} already exists");
         return Ok(version_dir);
     }
 
@@ -84,7 +92,7 @@ pub async fn download_steamrt(
         let _ = fs::remove_dir_all(&version_dir);
     }
 
-    println!("Downloading Steam Runtime {}...", STEAMRT_VERSION);
+    println!("Downloading Steam Runtime {STEAMRT_VERSION}...");
 
     fs::create_dir_all(&steamrt_dir)?;
 
@@ -96,7 +104,7 @@ pub async fn download_steamrt(
         match fs::metadata(&tarball_path) {
             Ok(metadata) => {
                 let size = metadata.len();
-                println!("Resuming Steam Runtime download from {} bytes", size);
+                println!("Resuming Steam Runtime download from {size} bytes");
                 size
             }
             Err(_) => 0,
@@ -111,7 +119,7 @@ pub async fn download_steamrt(
     let mut request = client.get(&download_url);
 
     if start_byte > 0 {
-        request = request.header("Range", format!("bytes={}-", start_byte));
+        request = request.header("Range", format!("bytes={start_byte}-"));
     }
 
     let response = request
@@ -181,8 +189,7 @@ pub async fn download_steamrt(
     // If extraction fails, clean up the incomplete installation
     if let Err(e) = extraction_result {
         eprintln!(
-            "Steam Runtime extraction failed: {}. Cleaning up partial installation and tarball...",
-            e
+            "Steam Runtime extraction failed: {e}. Cleaning up partial installation and tarball..."
         );
         let _ = fs::remove_dir_all(&version_dir);
         let _ = fs::remove_file(&tarball_path);
@@ -199,8 +206,7 @@ pub async fn download_steamrt(
     }
 
     println!(
-        "Steam Runtime {} installed to {:?}",
-        STEAMRT_VERSION, version_dir
+        "Steam Runtime {STEAMRT_VERSION} installed to {}", version_dir.display()
     );
 
     Ok(version_dir)
@@ -218,6 +224,8 @@ fn extract_tarball(tarball_path: &Path, dest_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// # Errors
+/// Returns an error if checksum verification fails.
 pub async fn verify_checksum(settings: &GlobalSettings) -> Result<bool> {
     let steamrt_dir = settings.components_directory.join("steamrt");
     let tarball_path = steamrt_dir.join(STEAMRT_TARBALL);
@@ -235,7 +243,6 @@ pub async fn verify_checksum(settings: &GlobalSettings) -> Result<bool> {
         .and_then(|line| line.split_whitespace().next())
         .context("Checksum not found in SHA256SUMS")?;
 
-    use sha2::{Digest, Sha256};
     let mut file = fs::File::open(&tarball_path)?;
     let mut hasher = Sha256::new();
     std::io::copy(&mut file, &mut hasher)?;
@@ -244,6 +251,8 @@ pub async fn verify_checksum(settings: &GlobalSettings) -> Result<bool> {
     Ok(actual_hash == expected_hash)
 }
 
+/// # Errors
+/// Returns an error if cleanup fails.
 pub fn cleanup_old_versions(settings: &GlobalSettings) -> Result<()> {
     let steamrt_dir = settings.components_directory.join("steamrt");
 
@@ -257,15 +266,14 @@ pub fn cleanup_old_versions(settings: &GlobalSettings) -> Result<()> {
         let entry = entry?;
         let path = entry.path();
 
-        if path.is_dir() {
-            if let Some(name) = path.file_name() {
+        if path.is_dir()
+            && let Some(name) = path.file_name() {
                 let name = name.to_string_lossy();
                 if name.starts_with("3.0.") && name != STEAMRT_VERSION {
-                    println!("Removing old Steam Runtime version: {}", name);
+                    println!("Removing old Steam Runtime version: {name}");
                     fs::remove_dir_all(&path)?;
                 }
             }
-        }
     }
 
     Ok(())

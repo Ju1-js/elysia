@@ -24,7 +24,7 @@ use std::sync::{Arc, RwLock};
 pub fn Game() -> Element {
     let selected_game_id = use_context::<Signal<Option<String>>>();
     let settings = use_context::<Signal<Arc<RwLock<GlobalSettings>>>>();
-    let video_state = use_signal(|| VideoState::new());
+    let video_state = use_signal(VideoState::new);
     let game_state =
         use_signal(|| std::sync::Arc::new(std::sync::RwLock::new(GlobalGameState::new())));
 
@@ -33,14 +33,11 @@ pub fn Game() -> Element {
     
     // Initialize game state based on default_preferences
     let mut game_state_init = game_state;
-    let settings_init = settings.clone();
+    let settings_init = settings;
     use_effect(move || {
         spawn(async move {
             let settings_read = settings_init.read();
-            let settings_guard = match settings_read.read() {
-                Ok(s) => s,
-                Err(_) => return,
-            };
+            let Ok(settings_guard) = settings_read.read() else { return };
             
             // Read the runner type from default_preferences
             let default_runner = &settings_guard.default_preferences.runner;
@@ -117,9 +114,7 @@ pub fn Game() -> Element {
     // Read the signal to establish reactivity - component will re-render when selected_game_id changes
     let current_game_id = selected_game_id.read();
     let _game_id_key = current_game_id
-        .as_ref()
-        .map(|s| s.clone())
-        .unwrap_or_else(|| "none".to_string());
+        .as_ref().map_or_else(|| "none".to_string(), std::clone::Clone::clone);
 
     rsx! {
         rect {

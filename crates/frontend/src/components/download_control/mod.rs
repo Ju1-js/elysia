@@ -8,14 +8,18 @@ use crate::theme;
 use freya::prelude::*;
 use std::rc::Rc;
 
+type GameProgressGetter = Rc<dyn Fn(&str) -> Option<types::DownloadProgress>>;
+type RuntimeProgressGetter = Rc<dyn Fn(&str) -> Option<types::SetupProgress>>;
+type TweaksProgressGetter = Rc<dyn Fn(&str) -> Option<types::SetupProgress>>;
+
 #[derive(Props)]
 pub struct DownloadControlProps {
     pub game_id: String,
     pub game_name: String,
     pub game_progress_key: String,
-    pub get_game_progress: Rc<dyn Fn(&str) -> Option<types::DownloadProgress>>,
-    pub get_runtime_progress: Rc<dyn Fn(&str) -> Option<types::SetupProgress>>,
-    pub get_tweaks_progress: Rc<dyn Fn(&str) -> Option<types::SetupProgress>>,
+    pub get_game_progress: GameProgressGetter,
+    pub get_runtime_progress: RuntimeProgressGetter,
+    pub get_tweaks_progress: TweaksProgressGetter,
     #[props(default = theme::ACCENT_PRIMARY.to_string())]
     pub accent_color: String,
     #[props(default)]
@@ -48,9 +52,9 @@ impl Clone for DownloadControlProps {
             get_runtime_progress: self.get_runtime_progress.clone(),
             get_tweaks_progress: self.get_tweaks_progress.clone(),
             accent_color: self.accent_color.clone(),
-            on_setup_runtime: self.on_setup_runtime.clone(),
-            on_setup_tweaks: self.on_setup_tweaks.clone(),
-            on_download_game: self.on_download_game.clone(),
+            on_setup_runtime: self.on_setup_runtime,
+            on_setup_tweaks: self.on_setup_tweaks,
+            on_download_game: self.on_download_game,
             game_state: self.game_state,
             game_needs_tweaks: self.game_needs_tweaks,
         }
@@ -85,7 +89,7 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
 
     let runtime_ready = use_memo(use_reactive!(|game_state| {
         let ready = game_state.read().is_runtime_ready();
-        eprintln!("[DownloadControl] runtime_ready: {}", ready);
+        eprintln!("[DownloadControl] runtime_ready: {ready}");
         ready
     }));
 
@@ -151,7 +155,7 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
 
     let runtime_busy = runtime_progress.read().is_some();
     let tweaks_busy = tweaks_progress.read().is_some();
-    let game_busy = game_progress.read().as_ref().map_or(false, |p| p.is_busy);
+    let game_busy = game_progress.read().as_ref().is_some_and(|p| p.is_busy);
 
     rsx! {
         rect {
@@ -251,13 +255,13 @@ fn ActionButton(
         let mut state = game_state;
         let is_running = state.read().is_game_running();
         
-        eprintln!("[ActionButton Click] game_running: {}", is_running);
+        eprintln!("[ActionButton Click] game_running: {is_running}");
         
         if is_running {
             // Kill game
             match state.write().kill_game() {
-                Ok(_) => eprintln!("[ActionButton] Game process killed successfully"),
-                Err(e) => eprintln!("[ActionButton] Failed to kill game: {}", e),
+                Ok(()) => eprintln!("[ActionButton] Game process killed successfully"),
+                Err(e) => eprintln!("[ActionButton] Failed to kill game: {e}"),
             }
         } else if !runtime_ready {
             // Setup runtime
@@ -354,6 +358,7 @@ fn DownloadWidget(
     accent: String,
     font: FontTheme,
 ) -> Element {
+    #[allow(clippy::cast_precision_loss)]
     let pct = if progress.total > 0 {
         (progress.downloaded as f64 / progress.total as f64) * 100.0
     } else {
@@ -363,7 +368,9 @@ fn DownloadWidget(
     let status = if progress.total > 0
         && (progress.status.starts_with("Downloading") || progress.status.starts_with("Extracting"))
     {
+        #[allow(clippy::cast_precision_loss)]
         let dl_gb = progress.downloaded as f64 / 1_000_000_000.0;
+        #[allow(clippy::cast_precision_loss)]
         let total_gb = progress.total as f64 / 1_000_000_000.0;
 
         if progress.speed_mb_s > 0.0 {
@@ -435,6 +442,7 @@ fn DownloadWidget(
 
 #[component]
 fn ProgressBar(progress: types::DownloadProgress, accent: String, font: FontTheme) -> Element {
+    #[allow(clippy::cast_precision_loss)]
     let pct = if progress.total > 0 {
         (progress.downloaded as f64 / progress.total as f64) * 100.0
     } else {

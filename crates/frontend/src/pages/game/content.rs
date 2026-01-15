@@ -39,7 +39,7 @@ use super::state::{GlobalGameStateSignal, RunnerType};
 /// * `game_id` - The game ID to associate tweaks readiness with
 /// * `component_svc` - The component service for checking installation status
 /// * `settings_guard` - Global settings containing installation paths
-fn update_component_readiness(
+async fn update_component_readiness(
     game_state: &mut GlobalGameStateSignal,
     runner_type: &RunnerType,
     game_id: &str,
@@ -51,11 +51,11 @@ fn update_component_readiness(
             let wine_installed = component_svc.is_installed(
                 settings_guard,
                 backend::components::ComponentType::Wine,
-            );
+            ).await;
             let dxvk_installed = component_svc.is_installed(
                 settings_guard,
                 backend::components::ComponentType::Dxvk,
-            );
+            ).await;
             game_state.write().set_wine_ready(wine_installed);
             game_state.write().set_dxvk_ready(dxvk_installed);
             game_state.write().set_proton_ready(false);
@@ -65,15 +65,15 @@ fn update_component_readiness(
             let proton_installed = component_svc.is_installed(
                 settings_guard,
                 backend::components::ComponentType::Proton,
-            );
+            ).await;
             let umu_installed = component_svc.is_installed(
                 settings_guard,
                 backend::components::ComponentType::Umu,
-            );
+            ).await;
             let steamrt_installed = component_svc.is_installed(
                 settings_guard,
                 backend::components::ComponentType::SteamRuntime,
-            );
+            ).await;
             let all_ready = proton_installed && umu_installed && steamrt_installed;
             game_state.write().set_proton_ready(all_ready);
             game_state.write().set_wine_ready(false);
@@ -85,7 +85,7 @@ fn update_component_readiness(
     let jadeite_installed = component_svc.is_installed(
         settings_guard,
         backend::components::ComponentType::Jadeite,
-    );
+    ).await;
     game_state.write().set_tweaks_ready(game_id, jadeite_installed);
 }
 
@@ -96,8 +96,8 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
     let settings = use_context::<Signal<Arc<RwLock<GlobalSettings>>>>();
     let mut page_state = use_context::<Signal<GamePageState>>();
     let mut game_state = use_context::<GlobalGameStateSignal>();
-    let mut video_state = use_context::<Signal<VideoState>>();
-    let tweak_manifest = use_signal(|| TweakManifest::new());
+    let video_state = use_context::<Signal<VideoState>>();
+    let tweak_manifest = use_signal(TweakManifest::new);
 
     let video_fade = use_animation(create_fade_animation());
 
@@ -170,13 +170,13 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
     };
 
     // Check if videos are disabled in settings
-    let videos_disabled = settings.read().read().ok().map(|s| s.disable_videos).unwrap_or(false);
+    let videos_disabled = settings.read().read().ok().is_some_and(|s| s.disable_videos);
 
     let (video_url, _theme_url) = ctx
         .api_game_basic_info
         .iter()
         .find(|info| info.game.id == game_data.id)
-        .map(|info| {
+        .map_or((None, None), |info| {
             let video = if videos_disabled {
                 None // Disable videos if setting is enabled
             } else {
@@ -184,8 +184,7 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
             };
             let theme = get_theme_url(&info.backgrounds);
             (video, theme)
-        })
-        .unwrap_or((None, None));
+        });
 
     let current_game_id = selected_game_id.read().clone();
     use_effect(use_reactive!(|current_game_id| {
@@ -194,7 +193,7 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
         if stored_prev.as_ref() != current_game_id.as_ref() {
             debug_info!("Game switch detected: {:?} -> {:?}", stored_prev, current_game_id);
             
-            page_state.write().prev_game_id = current_game_id.clone();
+            page_state.write().prev_game_id.clone_from(&current_game_id);
             *video_ready.write() = false;
             *video_loaded.write() = false;
             *show_settings.write() = false;
@@ -203,7 +202,7 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
 
     let bg_url_str = parsed_bg_url.to_string();
     use_effect(use_reactive!(|bg_url_str| {
-        let curr = bg_curr.peek().as_ref().map(|u| u.to_string());
+        let curr = bg_curr.peek().as_ref().map(std::string::ToString::to_string);
 
         if curr.as_ref() != Some(&bg_url_str) {
             debug_info!("Background URL updating to: {}", bg_url_str);
@@ -268,7 +267,7 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
 
     let video_opacity = if video_loaded() {
         if video_fade.is_running() {
-            video_fade.get().read().read() as f64
+            f64::from(video_fade.get().read().read())
         } else {
             1.0
         }
@@ -277,19 +276,19 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
     };
 
     let bg_fade_progress = if bg_fade.is_running() {
-        bg_fade.get().read().read() as f64
+        f64::from(bg_fade.get().read().read())
     } else {
         1.0
     };
 
     let theme_fade_progress = if theme_fade.is_running() {
-        theme_fade.get().read().read() as f64
+        f64::from(theme_fade.get().read().read())
     } else {
         1.0
     };
 
     let news_fade_progress = if news_fade.is_running() {
-        news_fade.get().read().read() as f64
+        f64::from(news_fade.get().read().read())
     } else {
         1.0
     };
@@ -301,7 +300,7 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
 
     let system_status = use_context::<Signal<Option<backend::status::SystemStatus>>>();
 
-    let progress_tracker = use_signal(|| ProgressTracker::new());
+    let progress_tracker = use_signal(ProgressTracker::new);
     let progress_tracker_instance = progress_tracker();
 
     let (game_progress_key, get_progress) =
@@ -316,7 +315,7 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
 
     // Sync game state with current game's runner configuration when game changes or settings update
     let game_id_for_state = game_data.id.clone();
-    let settings_watcher = settings.clone();
+    let settings_watcher = settings;
     use_effect(use_reactive!(|game_id_for_state, settings_watcher| {
         let settings_arc = settings_watcher.read().clone();
         if let Ok(settings_guard) = settings_arc.read() {
@@ -331,35 +330,39 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
             let runner_type = if let Some(game) = settings_guard.installed_games.get(&game_id_for_state) {
                 // Game is installed - use its runner
                 match &game.runner {
-                    backend::runners::Runners::Native => RunnerType::Proton,
                     backend::runners::Runners::Wine(_) => RunnerType::Wine,
-                    backend::runners::Runners::Proton(_) => RunnerType::Proton,
+                    backend::runners::Runners::Native | backend::runners::Runners::Proton(_) => RunnerType::Proton,
                 }
             } else if let Some(prefs) = settings_guard.game_preferences.get(&game_id_for_state) {
                 // Game has preferences - use those
                 match &prefs.runner {
-                    backend::runners::Runners::Native => RunnerType::Proton,
                     backend::runners::Runners::Wine(_) => RunnerType::Wine,
-                    backend::runners::Runners::Proton(_) => RunnerType::Proton,
+                    backend::runners::Runners::Native | backend::runners::Runners::Proton(_) => RunnerType::Proton,
                 }
             } else {
                 // No game-specific settings - use defaults
                 match &settings_guard.default_preferences.runner {
-                    backend::runners::Runners::Native => RunnerType::Proton,
                     backend::runners::Runners::Wine(_) => RunnerType::Wine,
-                    backend::runners::Runners::Proton(_) => RunnerType::Proton,
+                    backend::runners::Runners::Native | backend::runners::Runners::Proton(_) => RunnerType::Proton,
                 }
             };
 
             // Update component readiness based on runner type
             if let Some(ref svc) = component_svc {
-                update_component_readiness(
-                    &mut game_state,
-                    &runner_type,
-                    &game_id_for_state,
-                    svc,
-                    &settings_guard,
-                );
+                let svc_clone = svc.clone();
+                let mut game_state_clone = game_state;
+                let runner_type_clone = runner_type.clone();
+                let game_id_clone = game_id_for_state.clone();
+                let settings_clone = settings_guard.clone();
+                spawn(async move {
+                    update_component_readiness(
+                        &mut game_state_clone,
+                        &runner_type_clone,
+                        &game_id_clone,
+                        &svc_clone,
+                        &settings_clone,
+                    ).await;
+                });
             }
 
             // Update the runner type in state
@@ -411,7 +414,7 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
 
     let settings_scale = if show_settings() {
         if settings_scale_anim.is_running() {
-            settings_scale_anim.get().read().read() as f64
+            f64::from(settings_scale_anim.get().read().read())
         } else {
             1.0
         }
@@ -438,7 +441,7 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
                 prev_theme_url: prev_theme,
                 theme_fade_progress,
                 static_bg_url: parsed_bg_url,
-                on_video_ready: move |_| video_ready.set(true),
+                on_video_ready: move |()| video_ready.set(true),
             }
 
             rect {
@@ -454,7 +457,7 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
                     TopRightButtons {}
 
                     BottomRightButtons {
-                        on_settings: move |_| {
+                        on_settings: move |()| {
                             show_settings.set(true);
                             settings_scale_anim.start();
                         },
@@ -536,7 +539,7 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
                     layer: "1",
 
                     GameSettingsModal {
-                        on_close: move |_| show_settings.set(false),
+                        on_close: move |()| show_settings.set(false),
                         game_name: game_data.display.name.clone(),
                         scale: settings_scale,
                     }

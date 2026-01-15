@@ -3,7 +3,7 @@
 /// This module provides consistent color values across the application,
 /// making it easier to maintain visual consistency and prepare for
 /// future user-configurable themes.
-
+///
 /// Primary accent color used for progress bars, highlights, and interactive elements
 /// This vibrant orange is used throughout the app for download progress and emphasis
 pub const ACCENT_PRIMARY: &str = "#ff9500";

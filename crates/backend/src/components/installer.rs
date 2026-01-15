@@ -11,6 +11,8 @@ pub struct ComponentRequirement {
     pub display_name: String,
 }
 
+/// # Errors
+/// Returns an error if component installation fails.
 pub async fn install_components(
     settings: &GlobalSettings,
     component_manager: &ComponentManager,
@@ -33,11 +35,13 @@ pub async fn install_components(
                     tracker.report(
                         progress_key,
                         &format!("Steam Runtime {}", steamrt::STEAMRT_VERSION),
-                        0,
-                        100,
-                        true,
-                        Some(step_idx),
-                        Some(total_steps),
+                        crate::progress::ReportParams {
+                            downloaded: 0,
+                            total: 100,
+                            is_busy: true,
+                            step_index: Some(step_idx),
+                            total_steps: Some(total_steps),
+                        },
                     );
                 }
 
@@ -49,11 +53,13 @@ pub async fn install_components(
                         tracker.report(
                             &key,
                             &name,
-                            downloaded,
-                            total,
-                            true,
-                            Some(step_idx),
-                            Some(total_steps),
+                            crate::progress::ReportParams {
+                                downloaded,
+                                total,
+                                is_busy: true,
+                                step_index: Some(step_idx),
+                                total_steps: Some(total_steps),
+                            },
                         );
                     }) as Box<dyn Fn(u64, u64) + Send>
                 });
@@ -67,19 +73,19 @@ pub async fn install_components(
 
             // Get the version that will be downloaded to use its display_name
             let version_to_download = component_manager.get_latest_version(req.component_type);
-            let display_name = version_to_download
-                .map(|v| v.display_name.clone())
-                .unwrap_or_else(|| req.display_name.clone());
+            let display_name = version_to_download.map_or_else(|| req.display_name.clone(), |v| v.display_name.clone());
 
             if let Some(tracker) = progress_tracker {
                 tracker.report(
                     progress_key,
                     &display_name,
-                    0,
-                    100,
-                    true,
-                    Some(step_idx),
-                    Some(total_steps),
+                    crate::progress::ReportParams {
+                        downloaded: 0,
+                        total: 100,
+                        is_busy: true,
+                        step_index: Some(step_idx),
+                        total_steps: Some(total_steps),
+                    },
                 );
             }
 
@@ -91,11 +97,13 @@ pub async fn install_components(
                     tracker.report(
                         &key,
                         &name,
-                        downloaded,
-                        total,
-                        true,
-                        Some(step_idx),
-                        Some(total_steps),
+                        crate::progress::ReportParams {
+                            downloaded,
+                            total,
+                            is_busy: true,
+                            step_index: Some(step_idx),
+                            total_steps: Some(total_steps),
+                        },
                     );
                 }) as Box<dyn Fn(u64, u64) + Send>
             });
@@ -113,6 +121,11 @@ pub async fn install_components(
     Ok(env_vars)
 }
 
+/// # Errors
+/// Returns an error if Proton runtime installation fails.
+/// # Panics
+/// Panics if the hardcoded UMU URL is invalid.
+#[allow(clippy::too_many_lines)]
 pub async fn install_proton_runtime(
     settings: &GlobalSettings,
     component_manager: &mut ComponentManager,
@@ -137,7 +150,7 @@ pub async fn install_proton_runtime(
             .cache
             .entries
             .entry(ComponentType::Umu)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(umu_version);
 
         requirements.push(ComponentRequirement {
@@ -166,11 +179,13 @@ pub async fn install_proton_runtime(
                 tracker.report(
                     progress_key,
                     &req.display_name,
-                    0,
-                    100,
-                    true,
-                    Some(step_idx),
-                    Some(total_steps),
+                    crate::progress::ReportParams {
+                        downloaded: 0,
+                        total: 100,
+                        is_busy: true,
+                        step_index: Some(step_idx),
+                        total_steps: Some(total_steps),
+                    },
                 );
             }
 
@@ -182,11 +197,13 @@ pub async fn install_proton_runtime(
                     tracker.report(
                         &key,
                         &name,
-                        downloaded,
-                        total,
-                        true,
-                        Some(step_idx),
-                        Some(total_steps),
+                        crate::progress::ReportParams {
+                            downloaded,
+                            total,
+                            is_busy: true,
+                            step_index: Some(step_idx),
+                            total_steps: Some(total_steps),
+                        },
                     );
                 }) as Box<dyn Fn(u64, u64) + Send>
             });
@@ -210,19 +227,19 @@ pub async fn install_proton_runtime(
                 component_manager.get_latest_version(req.component_type)
             };
 
-            let display_name = version_to_download
-                .map(|v| v.display_name.clone())
-                .unwrap_or_else(|| req.display_name.clone());
+            let display_name = version_to_download.map_or_else(|| req.display_name.clone(), |v| v.display_name.clone());
 
             if let Some(tracker) = progress_tracker {
                 tracker.report(
                     progress_key,
                     &display_name,
-                    0,
-                    100,
-                    true,
-                    Some(step_idx),
-                    Some(total_steps),
+                    crate::progress::ReportParams {
+                        downloaded: 0,
+                        total: 100,
+                        is_busy: true,
+                        step_index: Some(step_idx),
+                        total_steps: Some(total_steps),
+                    },
                 );
             }
 
@@ -234,11 +251,13 @@ pub async fn install_proton_runtime(
                     tracker.report(
                         &key,
                         &name,
-                        downloaded,
-                        total,
-                        true,
-                        Some(step_idx),
-                        Some(total_steps),
+                        crate::progress::ReportParams {
+                            downloaded,
+                            total,
+                            is_busy: true,
+                            step_index: Some(step_idx),
+                            total_steps: Some(total_steps),
+                        },
                     );
                 }) as Box<dyn Fn(u64, u64) + Send>
             });
@@ -258,6 +277,8 @@ pub async fn install_proton_runtime(
     Ok(())
 }
 
+/// # Errors
+/// Returns an error if tweak installation fails.
 pub async fn install_tweaks(
     settings: &GlobalSettings,
     _game_id: &str,
@@ -274,12 +295,16 @@ pub async fn install_tweaks(
 
     // Get the version that will be downloaded to use its display_name
     let version_to_download = component_manager.get_latest_version(ComponentType::Jadeite);
-    let display_name = version_to_download
-        .map(|v| v.display_name.clone())
-        .unwrap_or_else(|| "Jadeite".to_string());
+    let display_name = version_to_download.map_or_else(|| "Jadeite".to_string(), |v| v.display_name.clone());
 
     if let Some(tracker) = progress_tracker {
-        tracker.report(progress_key, &display_name, 0, 100, true, Some(0), Some(1));
+        tracker.report(progress_key, &display_name, crate::progress::ReportParams {
+            downloaded: 0,
+            total: 100,
+            is_busy: true,
+            step_index: Some(0),
+            total_steps: Some(1),
+        });
     }
 
     let progress_callback = progress_tracker.map(|tracker| {
@@ -287,7 +312,13 @@ pub async fn install_tweaks(
         let key = progress_key.to_string();
         let name = display_name.clone();
         Box::new(move |downloaded: u64, total: u64| {
-            tracker.report(&key, &name, downloaded, total, true, Some(0), Some(1));
+            tracker.report(&key, &name, crate::progress::ReportParams {
+                downloaded,
+                total,
+                is_busy: true,
+                step_index: Some(0),
+                total_steps: Some(1),
+            });
         }) as Box<dyn Fn(u64, u64) + Send>
     });
 

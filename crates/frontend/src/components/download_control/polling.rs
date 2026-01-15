@@ -3,10 +3,12 @@ use crate::debug;
 use freya::prelude::*;
 use std::rc::Rc;
 
+type SetupProgressGetter = Rc<dyn Fn(&str) -> Option<SetupProgress>>;
+
 pub fn poll_runtime_setup(
     _active: Signal<bool>,
     key: &str,
-    get_progress: Rc<dyn Fn(&str) -> Option<SetupProgress>>,
+    get_progress: SetupProgressGetter,
     mut progress: Signal<Option<SetupProgress>>,
     mut game_state: crate::pages::game::state::GlobalGameStateSignal,
 ) {
@@ -39,7 +41,7 @@ pub fn poll_tweaks_setup(
     _active: Signal<bool>,
     key: &str,
     game_id: String,
-    get_progress: Rc<dyn Fn(&str) -> Option<SetupProgress>>,
+    get_progress: SetupProgressGetter,
     mut progress: Signal<Option<SetupProgress>>,
     mut game_state: crate::pages::game::state::GlobalGameStateSignal,
 ) {
@@ -66,11 +68,12 @@ pub fn poll_tweaks_setup(
         });
     });
 }
+type DownloadProgressGetter = Rc<dyn Fn(&str) -> Option<DownloadProgress>>;
 
 pub fn poll_download(
     active: Signal<bool>,
     key: &str,
-    get_progress: Rc<dyn Fn(&str) -> Option<DownloadProgress>>,
+    get_progress: DownloadProgressGetter,
     mut progress: Signal<Option<DownloadProgress>>,
     mut game_state: crate::pages::game::state::GlobalGameStateSignal,
     game_id: String,
@@ -118,12 +121,11 @@ pub fn poll_download(
                 // Update local display
                 progress.set(current.clone());
 
-                if let Some(p) = current {
-                    if !p.is_busy {
+                if let Some(p) = current
+                    && !p.is_busy {
                         progress.set(None);
                         break;
                     }
-                }
 
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }

@@ -24,30 +24,37 @@ const API_URL: &str = "https://sg-hyp-api.hoyoverse.com/hyp/hyp-connect/api";
 // TODO: other launchers (global, china, 3x bilibili?)
 const LAUNCHER_ID: &str = "VYTpXlbWo8"; // Global
 
+/// # Errors
+/// Returns an error if the API request fails.
 pub async fn get_games(settings: &GlobalSettings) -> Result<GetGames, String> {
     let url = format!("{API_URL}/getGames?launcher_id={LAUNCHER_ID}&language=en-us");
 
     return cached_request(settings, &url).await;
 }
 
+/// # Errors
+/// Returns an error if the API request fails.
 pub async fn get_game_content(
     settings: &GlobalSettings,
     game_id: &str,
 ) -> Result<GetGameContent, String> {
     let url = format!(
-        "{API_URL}/getGameContent?game_id={}&launcher_id={LAUNCHER_ID}&language=en-us",
-        game_id
+        "{API_URL}/getGameContent?game_id={game_id}&launcher_id={LAUNCHER_ID}&language=en-us"
     );
 
     return cached_request(settings, &url).await;
 }
 
+/// # Errors
+/// Returns an error if the API request fails.
 pub async fn get_game_scan_info(settings: &GlobalSettings) -> Result<GetGameScanInfo, String> {
     let url = format!("{API_URL}/getGameScanInfo?launcher_id={LAUNCHER_ID}&language=en-us");
 
     return cached_request(settings, &url).await;
 }
 
+/// # Errors
+/// Returns an error if the API request fails.
 pub async fn get_game_configs(settings: &GlobalSettings) -> Result<GetGameConfigs, String> {
     let url = format!("{API_URL}/getGameConfigs?launcher_id={LAUNCHER_ID}&language=en-us");
 
@@ -55,7 +62,9 @@ pub async fn get_game_configs(settings: &GlobalSettings) -> Result<GetGameConfig
 }
 
 /// Get all game basic info including video backgrounds
-/// If game_id is provided, filters for that specific game
+/// If `game_id` is provided, filters for that specific game
+/// # Errors
+/// Returns an error if the API request fails.
 pub async fn get_all_game_basic_info(
     settings: &GlobalSettings,
     game_id: Option<&str>,
@@ -69,6 +78,8 @@ pub async fn get_all_game_basic_info(
 }
 
 /// Get video backgrounds for a specific game
+/// # Errors
+/// Returns an error if the API request fails.
 pub async fn get_game_video_backgrounds(
     settings: &GlobalSettings,
     game_id: &str,
@@ -92,6 +103,8 @@ pub async fn get_game_video_backgrounds(
     Ok(video_urls)
 }
 
+/// # Errors
+/// Returns an error if scanning fails.
 pub async fn scan_dir(
     settings: &GlobalSettings,
     path: &Path,
@@ -130,7 +143,7 @@ pub async fn scan_dir(
 async fn md5(path: &Path) -> Result<String, String> {
     let mut file = File::open(path)
         .await
-        .map_err(|e| format!("Failed to open file: {}", e))?;
+        .map_err(|e| format!("Failed to open file: {e}"))?;
     let mut hasher = md5::Context::new();
     let mut buffer = vec![0; 1024];
 
@@ -138,7 +151,7 @@ async fn md5(path: &Path) -> Result<String, String> {
         let size = file
             .read(&mut buffer)
             .await
-            .map_err(|e| format!("Failed to read file: {}", e))?;
+            .map_err(|e| format!("Failed to read file: {e}"))?;
 
         if size == 0 {
             break; // EOF
@@ -148,7 +161,7 @@ async fn md5(path: &Path) -> Result<String, String> {
     }
 
     let result = hasher.finalize();
-    let hash_hex = format!("{:x}", result);
+    let hash_hex = format!("{result:x}");
 
     Ok(hash_hex)
 }
@@ -203,16 +216,18 @@ where
     Ok(response.data)
 }
 
+#[must_use] 
 pub fn get_video_url(backgrounds: &[Background]) -> Option<String> {
     backgrounds.iter().find_map(|bg| {
-        if !bg.video.url.is_empty() {
-            Some(bg.video.url.clone())
-        } else {
+        if bg.video.url.is_empty() {
             None
+        } else {
+            Some(bg.video.url.clone())
         }
     })
 }
 
+#[must_use] 
 pub fn get_theme_url(backgrounds: &[Background]) -> Option<String> {
     backgrounds
         .first()

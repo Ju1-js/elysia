@@ -26,15 +26,16 @@ pub struct InstallationManifest {
 pub struct InstallerManager;
 
 impl InstallerManager {
+    #[must_use] 
     pub fn create_installer(
         game_id: &str,
         biz: &str,
         temp_dir: PathBuf,
-        components_dir: PathBuf,
+        components_dir: &Path,
     ) -> Option<Box<dyn GameInstaller>> {
         let games_dir = components_dir
             .parent()
-            .unwrap_or(components_dir.as_path())
+            .unwrap_or(components_dir)
             .join("games");
 
         match biz {
@@ -65,22 +66,23 @@ impl InstallerManager {
                         && let Err(e) =
                             Self::persist_installation(&mut settings, game_id, installed_game)
                     {
-                        eprintln!("Failed to persist installation: {}", e);
+                        eprintln!("Failed to persist installation: {e}");
                     }
                 }
                 Err(e) => {
-                    eprintln!("Failed to install game: {}", e);
+                    eprintln!("Failed to install game: {e}");
                 }
             }
         });
     }
 
+    #[must_use] 
     pub fn is_game_installed(
         settings: &GlobalSettings,
         game_id: &str,
         biz: &str,
         temp_dir: PathBuf,
-        components_dir: PathBuf,
+        components_dir: &Path,
     ) -> bool {
         if !settings.installed_games.contains_key(game_id) {
             return false;
@@ -110,6 +112,8 @@ impl InstallerManager {
         false
     }
 
+    /// # Errors
+    /// Returns an error if the installation cannot be persisted.
     pub fn persist_installation(
         settings: &mut GlobalSettings,
         game_id: String,
@@ -119,7 +123,7 @@ impl InstallerManager {
 
         settings
             .save()
-            .map_err(|e| format!("Failed to save settings: {}", e))?;
+            .map_err(|e| format!("Failed to save settings: {e}"))?;
 
         Ok(())
     }

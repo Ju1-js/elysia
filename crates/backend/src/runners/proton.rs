@@ -21,12 +21,15 @@ impl Runner for Proton {
 
 impl Proton {
     /// Kill a Proton process using wineserver
+    /// # Errors
+    /// Returns an error if wineserver cannot be executed.
     pub fn kill_proton_process(proton_path: &str, prefix_path: &str) -> Result<()> {
         let wineserver_path = std::path::Path::new(proton_path).join("files/bin/wineserver");
         kill_wineserver(&wineserver_path, prefix_path)
     }
 
     /// Build the proton command with optional Jadeite injection
+    #[allow(clippy::unused_self)]
     fn build_proton_command(
         &self,
         settings: &GlobalSettings,
@@ -44,7 +47,7 @@ impl Proton {
             // Look for Jadeite in version subdirectories first, then fall back to base directory
             let jade = std::fs::read_dir(&jadeite_dir)
                 .context("Failed to read jadeite directory")?
-                .filter_map(|entry| entry.ok())
+                .filter_map(std::result::Result::ok)
                 .find(|entry| {
                     let path = entry.path();
                     path.is_dir() && path.join("jadeite.exe").exists()
@@ -67,7 +70,7 @@ impl Proton {
         );
 
         if let Some(ref game_args) = game.command_arguments {
-            args.extend(game_args.iter().map(|s| s.to_string()));
+            args.extend(game_args.iter().cloned());
         }
 
         Ok(args)
@@ -75,7 +78,7 @@ impl Proton {
 
     /// Apply command wrapper if specified
     fn apply_command_wrapper(
-        args: Vec<String>,
+        args: &[String],
         wrapper: Option<&String>,
     ) -> (String, Vec<String>) {
         if let Some(wrapper) = wrapper {
@@ -111,7 +114,7 @@ impl Proton {
 
         // Apply command wrapper if specified
         let (final_program, final_args) =
-            Self::apply_command_wrapper(proton_args, game.command_wrapper.as_ref());
+            Self::apply_command_wrapper(&proton_args, game.command_wrapper.as_ref());
 
         // Build the command
         let mut cmd = Command::new(&final_program);
@@ -143,8 +146,7 @@ impl Proton {
         }
 
         println!(
-            "Running: WINEPREFIX=\"{}\" {} {:?}",
-            prefix, final_program, final_args
+            "Running: WINEPREFIX=\"{prefix}\" {final_program} {final_args:?}"
         );
 
         let child = cmd.spawn().context("Failed to launch game")?;

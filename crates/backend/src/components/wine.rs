@@ -10,6 +10,7 @@ struct WineEntry {
     uri: String,
 }
 
+#[allow(clippy::unused_async)]
 pub async fn fetch_versions() -> Result<Vec<ComponentVersion>> {
     // Use include_str! to embed the JSON file at compile time
     let content = include_str!("wine/spritz.json");

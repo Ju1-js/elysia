@@ -1,10 +1,10 @@
 /// Shared components for displaying and managing component versions (Wine, Proton, DXVK)
 ///
 /// This module consolidates the repeated UI patterns for component selection, download,
-/// and status display that were previously duplicated across wine_section and proton_section.
+/// and status display that were previously duplicated across `wine_section` and `proton_section`.
 use crate::components::ComponentDownloadProgress;
 use crate::pages::settings_modal::components::StylizedDropdown;
-use crate::pages::settings_modal::styles::*;
+use crate::pages::settings_modal::styles::{TEXT_SECONDARY, INTERACTIVE_BG_DISABLED, INTERACTIVE_BG_SELECTED, INTERACTIVE_BG_SELECTED_HOVER, INTERACTIVE_BORDER_SELECTED, TEXT_SELECTED};
 use crate::pages::settings_modal::types::ComponentVersionInfo;
 use crate::services::{ComponentDownloadParams, initiate_component_download};
 use backend::components::ComponentType;
@@ -184,9 +184,7 @@ fn ComponentDownloadButton(
                         // Find the display name for the selected version
                         let version_display_name = available_versions.read()
                             .iter()
-                            .find(|v| v.internal_name == version)
-                            .map(|v| v.display_name.clone())
-                            .unwrap_or_else(|| version.clone());
+                            .find(|v| v.internal_name == version).map_or_else(|| version.clone(), |v| v.display_name.clone());
 
                         let service_option = component_service.read().clone();
                         let tracker = progress_tracker.read().clone();

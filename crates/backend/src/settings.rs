@@ -41,6 +41,8 @@ impl Default for GlobalSettings {
 }
 
 impl GlobalSettings {
+    /// # Errors
+    /// Returns an error if the config cannot be loaded.
     pub fn load() -> Result<GlobalSettings, String> {
         let config_path = &*CONFIG_PATH;
         let exists =
@@ -55,14 +57,18 @@ impl GlobalSettings {
         Ok(settings)
     }
 
+    /// # Errors
+    /// Returns an error if the config cannot be saved.
     pub fn save(&self) -> Result<(), String> {
         let data = serde_json::to_vec_pretty(self)
-            .map_err(|e| format!("Failed to serialize settings: {}", e))?;
+            .map_err(|e| format!("Failed to serialize settings: {e}"))?;
         fs::write(&*CONFIG_PATH, data)
-            .map_err(|e| format!("Failed to write settings file: {}", e))?;
+            .map_err(|e| format!("Failed to write settings file: {e}"))?;
         Ok(())
     }
 
+    /// # Panics
+    /// Panics if the paths cannot be validated or created.
     pub fn validate(&mut self) {
         let mut check_fn = || -> Result<(), String> {
             self.wineprefixes_directory = ensure_or_default(

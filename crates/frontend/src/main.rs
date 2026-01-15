@@ -43,32 +43,30 @@ fn main() {
 }
 
 /// Main application component that initializes settings, context, and global state
+#[allow(clippy::too_many_lines)]
 fn app() -> Element {
     let mut settings = use_signal(|| {
-        Arc::new(RwLock::new(match GlobalSettings::load() {
-            Ok(mut settings) => {
-                settings.validate();
-                settings
+        Arc::new(RwLock::new(if let Ok(mut settings) = GlobalSettings::load() {
+            settings.validate();
+            settings
+        } else {
+            let mut settings = GlobalSettings::default();
+            settings.validate();
+            if let Err(err) = settings.save() {
+                debug_error!("Failed to save settings: {}", err);
             }
-            Err(_) => {
-                let mut settings = GlobalSettings::default();
-                settings.validate();
-                if let Err(_err) = settings.save() {
-                    debug_error!("Failed to save settings: {}", _err);
-                }
-                settings
-            }
+            settings
         }))
     });
 
     use_hook(|| {
         let settings = settings.write();
-        if let Ok(mut _settings) = settings.clone().write() {
+        if let Ok(mut settings_data) = settings.clone().write() {
             // Use default preferences for runner and runtime components
-            let runner = _settings.default_preferences.runner.clone();
-            let runtime_components = _settings.default_preferences.runtime_components.clone();
+            let runner = settings_data.default_preferences.runner.clone();
+            let runtime_components = settings_data.default_preferences.runtime_components.clone();
             
-            _settings.installed_games.insert(
+            settings_data.installed_games.insert(
                 "U5hbdsT9W7".to_string(),
                 InstalledGame {
                     id: "U5hbdsT9W7".to_string(),
@@ -86,10 +84,9 @@ fn app() -> Element {
     {
         to_owned![settings];
         use_drop(move || {
-            if let Ok(settings_data) = settings().read() {
-                if let Err(_err) = settings_data.save() {
-                    debug_error!("Failed to save settings: {}", _err);
-                }
+            if let Ok(settings_data) = settings().read()
+                && let Err(err) = settings_data.save() {
+                debug_error!("Failed to save settings: {}", err);
             }
         });
     }
@@ -106,28 +103,26 @@ fn app() -> Element {
 
         let mut api_games = get_games(&settings_data)
             .await
-            .map_err(|err| err.to_string())
-            .map(|response| response.games)
-            .unwrap_or_else(|_err| {
-                debug_error!("Failed to load games from api: {_err}");
+            .map_err(|err| err.clone())
+            .map_or_else(|err| {
+                debug_error!("Failed to load games from api: {err}");
                 Vec::new()
-            });
+            }, |response| response.games);
 
         let endfield_games = backend::game_providers::endfield::get_games()
             .await
-            .map(|response| response.games)
-            .unwrap_or_else(|_err| {
-                debug_error!("Failed to load endfield games: {_err}");
+            .map_or_else(|err| {
+                debug_error!("Failed to load endfield games: {err}");
                 Vec::new()
-            });
+            }, |response| response.games);
 
         api_games.extend(endfield_games);
 
         let mut api_news = HashMap::new();
 
         for game in &api_games {
-            let game_id = game.id.to_owned();
-            let game_biz = game.biz.to_owned();
+            let game_id = game.id.clone();
+            let game_biz = game.biz.clone();
 
             let response = if game_biz == "endfield" {
                 backend::game_providers::endfield::get_game_content(&game_id).await
@@ -139,8 +134,8 @@ fn app() -> Element {
                 Ok(content_response) => {
                     api_news.insert(game_id, content_response.content);
                 }
-                Err(_err) => {
-                    debug_error!("Failed to load game content: {_err}");
+                Err(err) => {
+                    debug_error!("Failed to load game content: {err}");
                 }
             }
         }
@@ -148,11 +143,10 @@ fn app() -> Element {
         let api_game_basic_info =
             backend::game_providers::hoyoplay::get_all_game_basic_info(&settings_data, None)
                 .await
-                .map(|info| info.game_info_list)
-                .unwrap_or_else(|_err| {
-                    debug_error!("Failed to load game basic info: {_err}");
+                .map_or_else(|err| {
+                    debug_error!("Failed to load game basic info: {err}");
                     Vec::new()
-                });
+                }, |info| info.game_info_list);
 
         Context {
             api_games,
@@ -181,10 +175,10 @@ fn app() -> Element {
     use_context_provider(|| system_status);
 
     // GlobalGameState is the single source of truth for game state management
-    let game_state = use_signal(|| GlobalGameState::new());
+    let game_state = use_signal(GlobalGameState::new);
     use_context_provider(|| game_state);
 
-    let init_settings = settings.clone();
+    let init_settings = settings;
     let mut game_state_initialized = use_signal(|| false);
 
     use_effect(move || {
@@ -194,53 +188,55 @@ fn app() -> Element {
 
             spawn(async move {
                 // Check system status
-                let settings_guard = match settings_clone.read() {
-                    Ok(s) => s,
-                    Err(_e) => {
-                        debug_error!("Failed to read settings for initialization: {}", _e);
+                let (sys_status_check_data, runner_type, configured_wine_version, configured_proton_version, configured_dxvk_version, components_dir) = {
+                    let Ok(settings_guard) = settings_clone.read() else {
+                        debug_error!("Failed to read settings for initialization");
                         return;
-                    }
+                    };
+                    
+                    // Clone all data we need before the await
+                    let settings_data = settings_guard.clone();
+                    
+                    // Read the runner type and configured versions from default_preferences
+                    let default_runner = &settings_guard.default_preferences.runner;
+                    let (runner_type, configured_wine_version, configured_proton_version) = match default_runner {
+                        Runners::Wine(wine) => (
+                            crate::pages::game::state::RunnerType::Wine,
+                            Some(wine.version.clone()),
+                            None,
+                        ),
+                        Runners::Proton(proton) => (
+                            crate::pages::game::state::RunnerType::Proton,
+                            None,
+                            Some(proton.version.clone()),
+                        ),
+                        Runners::Native => {
+                            // Native shouldn't be in preferences, default to Proton
+                            debug_error!("Native runner found in default_preferences, defaulting to Proton");
+                            (crate::pages::game::state::RunnerType::Proton, None, None)
+                        }
+                    };
+                    
+                    // Get configured DXVK version
+                    let configured_dxvk_version = settings_guard
+                        .default_preferences
+                        .runtime_components
+                        .iter()
+                        .find_map(|component| {
+                            if let backend::settings::RuntimeComponents::Dxvk(version) = component {
+                                Some(version.clone())
+                            } else {
+                                None
+                            }
+                        });
+                    
+                    // Clone components directory for checking if specific versions exist
+                    let components_dir = settings_guard.components_directory.clone();
+                    
+                    (settings_data, runner_type, configured_wine_version, configured_proton_version, configured_dxvk_version, components_dir)
                 };
 
-                let sys_status = SystemStatus::check(&settings_guard).await;
-                
-                // Read the runner type and configured versions from default_preferences
-                let default_runner = &settings_guard.default_preferences.runner;
-                let (runner_type, configured_wine_version, configured_proton_version) = match default_runner {
-                    Runners::Wine(wine) => (
-                        crate::pages::game::state::RunnerType::Wine,
-                        Some(wine.version.clone()),
-                        None,
-                    ),
-                    Runners::Proton(proton) => (
-                        crate::pages::game::state::RunnerType::Proton,
-                        None,
-                        Some(proton.version.clone()),
-                    ),
-                    Runners::Native => {
-                        // Native shouldn't be in preferences, default to Proton
-                        debug_error!("Native runner found in default_preferences, defaulting to Proton");
-                        (crate::pages::game::state::RunnerType::Proton, None, None)
-                    }
-                };
-                
-                // Get configured DXVK version
-                let configured_dxvk_version = settings_guard
-                    .default_preferences
-                    .runtime_components
-                    .iter()
-                    .find_map(|component| {
-                        if let backend::settings::RuntimeComponents::Dxvk(version) = component {
-                            Some(version.clone())
-                        } else {
-                            None
-                        }
-                    });
-                
-                // Clone components directory for checking if specific versions exist
-                let components_dir = settings_guard.components_directory.clone();
-                
-                drop(settings_guard);
+                let sys_status = SystemStatus::check(&sys_status_check_data).await;
                 system_status.set(Some(sys_status.clone()));
 
                 // Set the runner type in GlobalGameState first
@@ -327,68 +323,67 @@ fn app() -> Element {
     // Note: Each Game page initializes its own GlobalGameState instance from default_preferences
     // There's no need for a reactive effect here since game pages handle their own state
 
-    let preload_settings = settings.clone();
+    let preload_settings = settings;
     let mut has_preloaded = use_signal(|| false);
 
     use_effect(move || {
-        if !has_preloaded() {
-            if let Some(context_data) = context.read_unchecked().as_ref() {
-                let games = context_data.api_games.clone();
-                let basic_info = context_data.api_game_basic_info.clone();
-                let api_news = context_data.api_news.clone();
-                let settings_signal = preload_settings.clone();
+        if !has_preloaded()
+            && let Some(context_data) = context.read_unchecked().as_ref() {
+            let games = context_data.api_games.clone();
+            let basic_info = context_data.api_game_basic_info.clone();
+            let api_news = context_data.api_news.clone();
+            let settings_signal = preload_settings;
 
-                spawn(async move {
-                    let settings_lock = settings_signal.read();
-                    if let Ok(settings_data) = settings_lock.read() {
-                        let cache_path = settings_data.cache_directory.display().to_string();
+            spawn(async move {
+                let settings_lock = settings_signal.read();
+                if let Ok(settings_data) = settings_lock.read() {
+                    let cache_path = settings_data.cache_directory.display().to_string();
 
-                        let mut image_urls: Vec<Url> = Vec::new();
+                    let mut image_urls: Vec<Url> = Vec::new();
 
-                        for game in &games {
-                            if let Ok(url) = game.display.background.url.parse() {
-                                image_urls.push(url);
-                            }
-                        }
-
-                        for game in &games {
-                            if let Ok(url) = game.display.icon.url.parse() {
-                                image_urls.push(url);
-                            }
-                        }
-
-                        for content in api_news.values() {
-                            for banner in &content.banners {
-                                if let Ok(url) = banner.image.url.parse() {
-                                    image_urls.push(url);
-                                }
-                            }
-                        }
-
-                        components::preload_images(image_urls, cache_path.clone());
-
-                        let mut video_urls: Vec<Url> = Vec::new();
-
-                        for info in &basic_info {
-                            if let Some(video_url) = get_video_url(&info.backgrounds) {
-                                if let Ok(url) = video_url.parse() {
-                                    video_urls.push(url);
-                                }
-                            }
-                        }
-
-                        if !video_urls.is_empty() {
-                            components::preload_videos(
-                                video_urls,
-                                settings_data.cache_directory.clone(),
-                                3,
-                            );
+                    for game in &games {
+                        if let Ok(url) = game.display.background.url.parse() {
+                            image_urls.push(url);
                         }
                     }
-                });
 
-                has_preloaded.set(true);
-            }
+                    for game in &games {
+                        if let Ok(url) = game.display.icon.url.parse() {
+                            image_urls.push(url);
+                        }
+                    }
+
+                    for content in api_news.values() {
+                        for banner in &content.banners {
+                            if let Ok(url) = banner.image.url.parse() {
+                                image_urls.push(url);
+                            }
+                        }
+                    }
+
+                    components::preload_images(image_urls, cache_path.clone());
+
+                    let mut video_urls: Vec<Url> = Vec::new();
+
+                    for info in &basic_info {
+                        if let Some(video_url) = get_video_url(&info.backgrounds)
+                            && let Ok(url) = video_url.parse()
+                        {
+                            video_urls.push(url);
+                        }
+                    }
+
+                    if !video_urls.is_empty() {
+                        components::preload_videos(
+                            video_urls,
+                            settings_data.cache_directory.clone(),
+                            3,
+                        );
+                    }
+                }
+            });
+
+            has_preloaded.set(true);
         }
     });
 

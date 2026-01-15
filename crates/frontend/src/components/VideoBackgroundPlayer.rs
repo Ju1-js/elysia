@@ -4,9 +4,11 @@ use freya::prelude::*;
 use skia_safe::{
     AlphaType, Canvas, ColorType, Data, FilterMode, ImageInfo, MipmapMode, SamplingOptions, images,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tokio::io::AsyncWriteExt;
+use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 
 use backend::settings::GlobalSettings;
@@ -43,7 +45,7 @@ fn generate_cache_filename(url: &str) -> String {
     format!("video_{:x}.webm", hasher.finish())
 }
 
-async fn get_cached_or_download_video(url: &str, cache_dir: &PathBuf) -> Result<PathBuf> {
+async fn get_cached_or_download_video(url: &str, cache_dir: &Path) -> Result<PathBuf> {
     let videos_cache_dir = cache_dir.join("videos");
     tokio::fs::create_dir_all(&videos_cache_dir)
         .await
@@ -67,9 +69,6 @@ async fn get_cached_or_download_video(url: &str, cache_dir: &PathBuf) -> Result<
         .context("Failed to create temp file")?;
 
     let mut stream = response.bytes_stream();
-
-    use tokio::io::AsyncWriteExt;
-    use tokio_stream::StreamExt;
 
     let mut total_bytes = 0;
     while let Some(chunk) = stream.next().await {
@@ -95,7 +94,7 @@ async fn get_cached_or_download_video(url: &str, cache_dir: &PathBuf) -> Result<
 fn extract_frame_pixels(frame: &ffmpeg::util::frame::Video) -> VideoFrame {
     let width = frame.width();
     let height = frame.height();
-    let stride = frame.stride(0) as usize;
+    let stride = frame.stride(0);
     let frame_data = frame.data(0);
 
     let mut pixels = Vec::with_capacity((width * height * 4) as usize);
@@ -127,6 +126,7 @@ fn get_valid_frame_rate(
         .unwrap_or_else(|| (30, 1).into())
 }
 
+#[allow(clippy::too_many_lines)]
 async fn decode_and_stream_video(
     url: String,
     shared_frame: Arc<Mutex<Option<VideoFrame>>>,
@@ -187,7 +187,7 @@ async fn decode_and_stream_video(
         }
 
         let frame_rate = get_valid_frame_rate(stream_fps, decoder.frame_rate());
-        let fps_value = frame_rate.0 as f64 / frame_rate.1 as f64;
+        let fps_value = f64::from(frame_rate.0) / f64::from(frame_rate.1);
         let frame_duration = Duration::from_secs_f64(1.0 / fps_value);
         
         debug_info!("Video decoder initialized: {} @ {:.1} FPS", url, fps_value);
@@ -264,13 +264,12 @@ async fn decode_and_stream_video(
                             let frame_memory_kb = video_frame.memory_size() / 1024;
 
                             if let Ok(mut frame_guard) = shared_frame.try_lock() {
-                                if !cancel_token.is_cancelled() {
-                                    *frame_guard = Some(video_frame);
-                                    let _ = frame_ready_tx.try_send(());
-                                    frame_count += 1;
-                                } else {
+                                if cancel_token.is_cancelled() {
                                     return Ok(());
                                 }
+                                *frame_guard = Some(video_frame);
+                                let _ = frame_ready_tx.try_send(());
+                                frame_count += 1;
                             }
 
                             if !first_frame_sent {
@@ -284,7 +283,7 @@ async fn decode_and_stream_video(
 
                             let elapsed = last_frame_time.elapsed();
                             if elapsed < frame_duration {
-                                let sleep_duration = frame_duration - elapsed;
+                                let sleep_duration = frame_duration.checked_sub(elapsed).unwrap();
                                 let sleep_start = Instant::now();
 
                                 while sleep_start.elapsed() < sleep_duration {
@@ -341,7 +340,7 @@ pub fn VideoBackgroundPlayer(video_url: String, on_ready: EventHandler<()>) -> E
     let platform = use_platform();
 
     let mut player_state = use_signal(|| None::<VideoPlayerState>);
-    let mut last_url = use_signal(|| String::new());
+    let mut last_url = use_signal(String::new);
 
     // Only recreate state when URL actually changes
     let current_url = video_url.clone();
@@ -354,8 +353,8 @@ pub fn VideoBackgroundPlayer(video_url: String, on_ready: EventHandler<()>) -> E
             state.cancel_token.cancel();
 
             if let Ok(mut guard) = state.shared_frame.lock() {
-                if let Some(ref _frame) = *guard {
-                    debug!("Releasing video frame memory: ~{} KB", _frame.memory_size() / 1024);
+                if let Some(ref frame) = *guard {
+                    debug!("Releasing video frame memory: ~{} KB", frame.memory_size() / 1024);
                 }
                 *guard = None;
             }
@@ -383,9 +382,7 @@ pub fn VideoBackgroundPlayer(video_url: String, on_ready: EventHandler<()>) -> E
             let cache_dir = settings_signal
                 .read()
                 .read()
-                .ok()
-                .map(|s| s.cache_directory.clone())
-                .unwrap_or_else(|| PathBuf::from("/tmp"));
+                .ok().map_or_else(|| PathBuf::from("/tmp"), |s| s.cache_directory.clone());
 
             let (frame_ready_tx, mut frame_ready_rx) = tokio::sync::mpsc::channel(2);
 
@@ -401,7 +398,7 @@ pub fn VideoBackgroundPlayer(video_url: String, on_ready: EventHandler<()>) -> E
                 let cancel_for_error = cancel_token.clone();
 
                 spawn(async move {
-                    if let Err(_err) = decode_and_stream_video(
+                    if let Err(err) = decode_and_stream_video(
                         url.clone(),
                         shared_frame,
                         cancel_token,
@@ -410,11 +407,9 @@ pub fn VideoBackgroundPlayer(video_url: String, on_ready: EventHandler<()>) -> E
                         frame_ready_tx,
                     )
                     .await
-                    {
-                        if !cancel_for_error.is_cancelled() {
-                            debug_error!("Playback error: {}", _err);
+                        && !cancel_for_error.is_cancelled() {
+                            debug_error!("Playback error: {}", err);
                         }
-                    }
                 });
 
                 if ready_rx.await.is_ok() && !cancel_check.is_cancelled() {
@@ -433,8 +428,8 @@ pub fn VideoBackgroundPlayer(video_url: String, on_ready: EventHandler<()>) -> E
             state.cancel_token.cancel();
 
             if let Ok(mut guard) = state.shared_frame.lock() {
-                if let Some(ref _frame) = *guard {
-                    debug!("Releasing video frame memory on drop: ~{} KB", _frame.memory_size() / 1024);
+                if let Some(ref frame) = *guard {
+                    debug!("Releasing video frame memory on drop: ~{} KB", frame.memory_size() / 1024);
                 }
                 *guard = None;
             }
@@ -447,30 +442,32 @@ pub fn VideoBackgroundPlayer(video_url: String, on_ready: EventHandler<()>) -> E
         move |canvas_context| {
             canvas_context.canvas.save();
 
+            #[allow(clippy::cast_precision_loss)]
             let canvas_width = canvas_context.canvas.image_info().width() as f32;
+            #[allow(clippy::cast_precision_loss)]
             let canvas_height = canvas_context.canvas.image_info().height() as f32;
 
             if let Some(ref state) = state_option {
                 if let Ok(frame_guard) = state.shared_frame.try_lock() {
                     if let Some(ref frame) = *frame_guard {
-                        if !state.cancel_token.is_cancelled() {
+                        if state.cancel_token.is_cancelled() {
+                            render_placeholder(canvas_context.canvas, canvas_width, canvas_height);
+                        } else {
                             render_video_frame(
-                                &canvas_context.canvas,
+                                canvas_context.canvas,
                                 frame,
                                 canvas_width,
                                 canvas_height,
                             );
-                        } else {
-                            render_placeholder(&canvas_context.canvas, canvas_width, canvas_height);
                         }
                     } else {
-                        render_placeholder(&canvas_context.canvas, canvas_width, canvas_height);
+                        render_placeholder(canvas_context.canvas, canvas_width, canvas_height);
                     }
                 } else {
-                    render_placeholder(&canvas_context.canvas, canvas_width, canvas_height);
+                    render_placeholder(canvas_context.canvas, canvas_width, canvas_height);
                 }
             } else {
-                render_placeholder(&canvas_context.canvas, canvas_width, canvas_height);
+                render_placeholder(canvas_context.canvas, canvas_width, canvas_height);
             }
 
             canvas_context.canvas.restore();
@@ -489,8 +486,18 @@ pub fn VideoBackgroundPlayer(video_url: String, on_ready: EventHandler<()>) -> E
 
 /// Render a video frame onto the canvas
 fn render_video_frame(canvas: &Canvas, frame: &VideoFrame, width: f32, height: f32) {
+    // Convert dimensions with saturation (video frames are unlikely to exceed i32::MAX)
+    let width_i32 = i32::try_from(frame.width).unwrap_or_else(|_| {
+        debug_error!("Video frame width {} exceeds i32::MAX, clamping", frame.width);
+        i32::MAX
+    });
+    let height_i32 = i32::try_from(frame.height).unwrap_or_else(|_| {
+        debug_error!("Video frame height {} exceeds i32::MAX, clamping", frame.height);
+        i32::MAX
+    });
+
     let image_info = ImageInfo::new(
-        (frame.width as i32, frame.height as i32),
+        (width_i32, height_i32),
         ColorType::RGBA8888,
         AlphaType::Premul,
         None,

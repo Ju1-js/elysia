@@ -14,6 +14,7 @@ pub struct EndfieldInstaller {
 }
 
 impl EndfieldInstaller {
+    #[must_use] 
     pub fn new(game_id: String, temp_dir: PathBuf, games_dir: PathBuf, biz_name: String) -> Self {
         Self {
             appcode: game_id.clone(),
@@ -69,7 +70,7 @@ impl GameInstaller for EndfieldInstaller {
 
         let v = super::batch_proxy_post(&body)
             .await
-            .map_err(|e| format!("batch proxy error: {}", e))?;
+            .map_err(|e| format!("batch proxy error: {e}"))?;
 
         let appcode = self.appcode.clone();
         let games_dir = self.games_dir.clone();
@@ -84,10 +85,10 @@ impl GameInstaller for EndfieldInstaller {
             ))
         })
         .await
-        .map_err(|e| format!("Task error: {}", e))?
-        .map_err(|e| format!("Install error: {}", e))?;
+        .map_err(|e| format!("Task error: {e}"))?
+        .map_err(|e| format!("Install error: {e}"))?;
 
-        println!("Endfield game installed at: {:?}", dest);
+        println!("Endfield game installed at: {}", dest.display());
         self.clear_progress();
 
         Ok(InstalledGame {

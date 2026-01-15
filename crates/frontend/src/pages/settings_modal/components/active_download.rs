@@ -99,6 +99,7 @@ pub fn ActiveDownloadWidget(
 
 #[component]
 fn GameDownloadProgress(progress: DownloadProgress) -> Element {
+    #[allow(clippy::cast_precision_loss)]
     let pct = if progress.total > 0 {
         (progress.downloaded as f64 / progress.total as f64) * 100.0
     } else {
@@ -106,9 +107,11 @@ fn GameDownloadProgress(progress: DownloadProgress) -> Element {
     };
 
     let size_info = if progress.total > 0 {
+        #[allow(clippy::cast_precision_loss)]
         let dl_gb = progress.downloaded as f64 / 1_000_000_000.0;
+        #[allow(clippy::cast_precision_loss)]
         let total_gb = progress.total as f64 / 1_000_000_000.0;
-        format!("{:.2} GB / {:.2} GB", dl_gb, total_gb)
+        format!("{dl_gb:.2} GB / {total_gb:.2} GB")
     } else {
         String::new()
     };
@@ -186,6 +189,7 @@ fn GameDownloadProgress(progress: DownloadProgress) -> Element {
 
 #[component]
 fn ComponentDownloadProgressWidget(progress: ComponentDownloadProgress) -> Element {
+    #[allow(clippy::cast_precision_loss)]
     let pct = if progress.total > 0 {
         (progress.downloaded as f64 / progress.total as f64) * 100.0
     } else {
@@ -193,9 +197,11 @@ fn ComponentDownloadProgressWidget(progress: ComponentDownloadProgress) -> Eleme
     };
 
     let size_info = if progress.total > 0 {
+        #[allow(clippy::cast_precision_loss)]
         let dl_mb = progress.downloaded as f64 / 1_000_000.0;
+        #[allow(clippy::cast_precision_loss)]
         let total_mb = progress.total as f64 / 1_000_000.0;
-        format!("{:.1} MB / {:.1} MB", dl_mb, total_mb)
+        format!("{dl_mb:.1} MB / {total_mb:.1} MB")
     } else {
         String::new()
     };

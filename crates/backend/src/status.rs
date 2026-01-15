@@ -31,7 +31,7 @@ impl SystemStatus {
         let umu_installed = umu_installed_version.is_some();
         let umu_needs_update = umu_installed_version
             .as_ref()
-            .map_or(false, |v| v != hardcoded_umu_version);
+            .is_some_and(|v| v != hardcoded_umu_version);
 
         let _ = component_manager
             .refresh_component(ComponentType::Jadeite)
@@ -103,22 +103,27 @@ impl SystemStatus {
         }
     }
 
+    #[must_use] 
     pub fn runtime_ready(&self) -> bool {
         self.proton.installed && self.umu.installed && self.steamrt.installed
     }
 
+    #[must_use] 
     pub fn wine_runtime_ready(&self) -> bool {
         self.wine.installed && self.dxvk.installed
     }
 
+    #[must_use] 
     pub fn runtime_needs_update(&self) -> bool {
         self.umu.needs_update
     }
 
+    #[must_use] 
     pub fn tweaks_ready(&self) -> bool {
         self.jadeite.installed
     }
 
+    #[must_use] 
     pub fn tweaks_need_update(&self) -> bool {
         self.jadeite.needs_update
     }

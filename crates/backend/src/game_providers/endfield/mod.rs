@@ -16,6 +16,8 @@ use std::path::{Path, PathBuf};
 
 const BASE_URL: &str = "https://launcher.gryphline.com";
 
+/// # Errors
+/// Returns an error if the API request fails.
 pub async fn batch_proxy_post(body: &Value) -> Result<Value, String> {
     let client = reqwest::Client::new();
 
@@ -23,7 +25,7 @@ pub async fn batch_proxy_post(body: &Value) -> Result<Value, String> {
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
     headers.insert("Accept", HeaderValue::from_static("application/json"));
 
-    let url = format!("{}/api/proxy/batch_proxy", BASE_URL);
+    let url = format!("{BASE_URL}/api/proxy/batch_proxy");
 
     let resp = client
         .post(&url)
@@ -41,6 +43,8 @@ pub async fn batch_proxy_post(body: &Value) -> Result<Value, String> {
     Ok(json)
 }
 
+/// # Errors
+/// Returns an error if the API request fails.
 pub async fn batch_proxy_web_post(body: &Value) -> Result<Value, String> {
     let client = reqwest::Client::new();
 
@@ -48,7 +52,7 @@ pub async fn batch_proxy_web_post(body: &Value) -> Result<Value, String> {
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
     headers.insert("Accept", HeaderValue::from_static("application/json"));
 
-    let url = format!("{}/api/proxy/web/batch_proxy", BASE_URL);
+    let url = format!("{BASE_URL}/api/proxy/web/batch_proxy");
 
     let resp = client
         .post(&url)
@@ -69,14 +73,18 @@ pub async fn batch_proxy_web_post(body: &Value) -> Result<Value, String> {
     Ok(json)
 }
 
+/// # Errors
+/// Returns an error if the file cannot be read or parsed.
 #[allow(dead_code)]
 pub async fn batch_proxy_post_from_file(path: &Path) -> Result<Value, String> {
     let data = std::fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read batch json {path:?}: {e}"))?;
+        .map_err(|e| format!("Failed to read batch json {}: {e}", path.display()))?;
     let v: Value = serde_json::from_str(&data).map_err(|e| format!("Invalid json file: {e}"))?;
     batch_proxy_post(&v).await
 }
 
+/// # Errors
+/// Returns an error if installation fails.
 pub async fn install_from_batch_body_value(
     resp_json: Value,
     game_name: &str,
@@ -84,15 +92,15 @@ pub async fn install_from_batch_body_value(
     temp_dir: &Path,
 ) -> Result<PathBuf, String> {
     std::fs::create_dir_all(games_dir)
-        .map_err(|e| format!("Failed to create games directory: {}", e))?;
+        .map_err(|e| format!("Failed to create games directory: {e}"))?;
 
     std::fs::create_dir_all(temp_dir)
-        .map_err(|e| format!("Failed to create temp directory: {}", e))?;
+        .map_err(|e| format!("Failed to create temp directory: {e}"))?;
 
     let typed: BatchProxyResponse = match serde_json::from_value(resp_json) {
         Ok(t) => t,
         Err(e) => {
-            let key = format!("{}_streaming", game_name);
+            let key = format!("{game_name}_streaming");
             download::set_progress(
                 &key,
                 download::Progress {
@@ -100,7 +108,7 @@ pub async fn install_from_batch_body_value(
                     total: 0,
                     part_index: 0,
                     parts_total: 0,
-                    status: format!("Error: Failed to deserialize batch response: {}", e),
+                    status: format!("Error: Failed to deserialize batch response: {e}"),
                     mb_s: 0.0,
                     is_busy: false,
                 },
@@ -109,9 +117,9 @@ pub async fn install_from_batch_body_value(
         }
     };
 
-    for proxy in typed.proxy_rsps.into_iter() {
-        if let Some(get_latest) = proxy.get_latest_game_rsp {
-            if let Some(pkg) = get_latest.pkg {
+    for proxy in typed.proxy_rsps {
+        if let Some(get_latest) = proxy.get_latest_game_rsp
+            && let Some(pkg) = get_latest.pkg {
                 let packs: Vec<api::Pack> = pkg
                     .packs
                     .into_iter()
@@ -119,7 +127,7 @@ pub async fn install_from_batch_body_value(
                     .collect();
 
                 if packs.is_empty() {
-                    let key = format!("{}_streaming", game_name);
+                    let key = format!("{game_name}_streaming");
                     download::set_progress(
                         &key,
                         download::Progress {
@@ -135,16 +143,16 @@ pub async fn install_from_batch_body_value(
                     return Err("No pack URLs found in batch response".to_string());
                 }
 
-                let progress_key = format!("{}_streaming", game_name);
+                let progress_key = format!("{game_name}_streaming");
                 let dest = games_dir.join("endfield");
 
                 eprintln!("[INFO] Starting streaming download & extraction");
                 eprintln!("[INFO]   Parts: {}", packs.len());
-                eprintln!("[INFO]   Destination: {:?}", dest);
-                eprintln!("[INFO]   Temp directory: {:?}", temp_dir);
+                eprintln!("[INFO]   Destination: {}", dest.display());
+                eprintln!("[INFO]   Temp directory: {}", temp_dir.display());
 
                 std::fs::create_dir_all(&dest)
-                    .map_err(|e| format!("Failed to create game directory: {}", e))?;
+                    .map_err(|e| format!("Failed to create game directory: {e}"))?;
 
                 download::set_progress(
                     &progress_key,
@@ -162,13 +170,12 @@ pub async fn install_from_batch_body_value(
                 download::download_and_extract_streaming(packs, &dest, &progress_key, game_name)
                     .await?;
 
-                eprintln!("[INFO] Installation complete: {:?}", dest);
+                eprintln!("[INFO] Installation complete: {}", dest.display());
                 return Ok(dest);
             }
-        }
     }
 
-    let key = format!("{}_streaming", game_name);
+    let key = format!("{game_name}_streaming");
     download::set_progress(
         &key,
         download::Progress {
@@ -184,6 +191,8 @@ pub async fn install_from_batch_body_value(
     Err("No get_latest_game response with package info found".to_string())
 }
 
+/// # Errors
+/// Returns an error if the image cannot be fetched.
 pub async fn get_main_bg_image(app_code: &str) -> Result<String, String> {
     let body = serde_json::json!({
         "proxy_reqs": [{
@@ -202,7 +211,7 @@ pub async fn get_main_bg_image(app_code: &str) -> Result<String, String> {
     let resp_json = batch_proxy_web_post(&body).await?;
 
     let typed: BatchProxyResponse = serde_json::from_value(resp_json)
-        .map_err(|e| format!("Failed to deserialize batch response: {}", e))?;
+        .map_err(|e| format!("Failed to deserialize batch response: {e}"))?;
 
     for proxy in typed.proxy_rsps {
         if let Some(bg_rsp) = proxy.get_main_bg_image_rsp
@@ -215,6 +224,8 @@ pub async fn get_main_bg_image(app_code: &str) -> Result<String, String> {
     Err("No background image found in response".to_string())
 }
 
+/// # Errors
+/// Returns an error if game data cannot be fetched.
 pub async fn get_games() -> Result<GetGames, String> {
     let app_code = "zePXHT2t4L2tKR4m";
 
@@ -263,6 +274,9 @@ pub async fn get_games() -> Result<GetGames, String> {
     Ok(GetGames { games: vec![game] })
 }
 
+/// # Errors
+/// Returns an error if game content cannot be fetched.
+#[allow(clippy::unused_async)]
 pub async fn get_game_content(game_id: &str) -> Result<GetGameContent, String> {
     let content = Content {
         game: GameInfo {

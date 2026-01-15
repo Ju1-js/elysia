@@ -1,5 +1,6 @@
 use freya::prelude::*;
 use std::sync::{Arc, RwLock};
+use std::rc::Rc;
 
 use crate::components::{DownloadProgress, SetupProgress, SetupStep};
 use crate::{debug, debug_error, debug_info};
@@ -12,10 +13,12 @@ use backend::{
 
 use super::state::GlobalGameStateSignal;
 
+type SetupProgressGetter = Rc<dyn Fn(&str) -> Option<SetupProgress>>;
+
 /// Create a progress getter for runtime component downloads
 pub fn create_runtime_progress_getter(
     progress_tracker: ProgressTracker,
-) -> std::rc::Rc<dyn Fn(&str) -> Option<SetupProgress>> {
+) -> SetupProgressGetter {
     std::rc::Rc::new(move |key: &str| -> Option<SetupProgress> {
         let comp_progress = progress_tracker.get(key)?;
 
@@ -69,7 +72,7 @@ pub fn create_runtime_progress_getter(
 /// Create a progress getter for tweaks downloads
 pub fn create_tweaks_progress_getter(
     progress_tracker: ProgressTracker,
-) -> std::rc::Rc<dyn Fn(&str) -> Option<SetupProgress>> {
+) -> SetupProgressGetter {
     std::rc::Rc::new(move |key: &str| -> Option<SetupProgress> {
         let comp_progress = progress_tracker.get(key)?;
 
@@ -104,6 +107,7 @@ pub fn create_tweaks_progress_getter(
 }
 
 /// Create an event handler for component setup
+#[allow(clippy::too_many_lines)]
 pub fn create_component_setup_handler(
     settings: Signal<Arc<RwLock<GlobalSettings>>>,
     progress_tracker: ProgressTracker,
@@ -119,11 +123,11 @@ pub fn create_component_setup_handler(
         let mut state_signal = game_state;
 
         let runner_type = state_signal.read().current_runner_type.clone();
-        let _missing = state_signal.read().get_missing_components();
+        let missing = state_signal.read().get_missing_components();
 
         debug!(
             "Starting download for {:?}, missing: {:?}",
-            runner_type, _missing
+            runner_type, missing
         );
 
         let service_opt = component_service.read().clone();
@@ -135,22 +139,19 @@ pub fn create_component_setup_handler(
         spawn(async move {
             state_signal.write().set_runtime_active(true);
 
-            let settings_guard = match settings_arc.read() {
-                Ok(s) => s,
-                Err(_) => {
-                    debug_error!("Failed to acquire settings lock");
-                    state_signal.write().set_runtime_active(false);
-                    return;
-                }
+            let settings_data = if let Ok(s) = settings_arc.read() { s.clone() } else {
+                debug_error!("Failed to acquire settings lock");
+                state_signal.write().set_runtime_active(false);
+                return;
             };
 
             debug!("Re-checking component readiness...");
             match runner_type {
                 super::state::RunnerType::Wine => {
                     let wine_installed = service
-                        .is_installed(&settings_guard, backend::components::ComponentType::Wine);
+                        .is_installed(&settings_data, backend::components::ComponentType::Wine).await;
                     let dxvk_installed = service
-                        .is_installed(&settings_guard, backend::components::ComponentType::Dxvk);
+                        .is_installed(&settings_data, backend::components::ComponentType::Dxvk).await;
                     state_signal.write().set_wine_ready(wine_installed);
                     state_signal.write().set_dxvk_ready(dxvk_installed);
                     debug!(
@@ -160,13 +161,13 @@ pub fn create_component_setup_handler(
                 }
                 super::state::RunnerType::Proton => {
                     let proton_installed = service
-                        .is_installed(&settings_guard, backend::components::ComponentType::Proton);
+                        .is_installed(&settings_data, backend::components::ComponentType::Proton).await;
                     let umu_installed = service
-                        .is_installed(&settings_guard, backend::components::ComponentType::Umu);
+                        .is_installed(&settings_data, backend::components::ComponentType::Umu).await;
                     let steamrt_installed = service.is_installed(
-                        &settings_guard,
+                        &settings_data,
                         backend::components::ComponentType::SteamRuntime,
-                    );
+                    ).await;
 
                     let all_ready = proton_installed && umu_installed && steamrt_installed;
                     state_signal.write().set_proton_ready(all_ready);
@@ -177,46 +178,42 @@ pub fn create_component_setup_handler(
                 }
             }
 
-            let _missing = state_signal.read().get_missing_components();
+            let missing = state_signal.read().get_missing_components();
             debug!(
                 "After re-check, missing components: {:?}",
-                _missing
+                missing
             );
 
             let manager_arc = service.manager();
-            let mut component_manager = match manager_arc.try_write() {
-                Ok(cm) => cm,
-                Err(_) => {
-                    debug_error!(
-                        "ComponentManager is busy, please wait for current download to finish"
-                    );
-                    tracker.report("runtime_setup", "Runtime Setup", 0, 0, false, None, None);
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                    tracker.clear("runtime_setup");
-                    state_signal.write().set_runtime_active(false);
-                    return;
-                }
-            };
+            
+            // Note: tokio::sync::RwLock always succeeds in acquiring locks eventually
+            // There's no need to check availability as the lock is async-aware
 
-            match runner_type {
+            let setup_result: Result<(), anyhow::Error> = match runner_type {
                 super::state::RunnerType::Wine => {
+                    let mut result = Ok(());
+                    
                     if !state_signal.read().component_setup.wine_ready {
                         debug!("Downloading Wine...");
-                        match backend::runners::Runners::download_wine(
-                            &settings_guard,
-                            &component_manager,
-                            None,
-                            Some(&tracker),
-                            "runtime_setup",
-                        )
-                        .await
-                        {
-                            Ok(_) => {
+                        result = {
+                            let component_manager = manager_arc.read().await;
+                            backend::runners::Runners::download_wine(
+                                &settings_data,
+                                &component_manager,
+                                None,
+                                Some(&tracker),
+                                "runtime_setup",
+                            )
+                            .await
+                        };
+                        
+                        match result {
+                            Ok(()) => {
                                 state_signal.write().set_wine_ready(true);
                                 debug!("Wine downloaded successfully");
                             }
-                            Err(_e) => {
-                                debug_error!("Failed to download Wine: {}", _e);
+                            Err(ref e) => {
+                                debug_error!("Failed to download Wine: {}", e);
                                 tracker.clear("runtime_setup");
                                 state_signal.write().set_runtime_active(false);
                                 return;
@@ -226,45 +223,56 @@ pub fn create_component_setup_handler(
 
                     if !state_signal.read().component_setup.dxvk_ready {
                         debug!("Downloading DXVK...");
-                        match backend::runners::Runners::download_dxvk(
-                            &settings_guard,
-                            &component_manager,
-                            None,
-                            Some(&tracker),
-                            "runtime_setup",
-                        )
-                        .await
-                        {
-                            Ok(_) => {
+                        result = {
+                            let component_manager = manager_arc.read().await;
+                            backend::runners::Runners::download_dxvk(
+                                &settings_data,
+                                &component_manager,
+                                None,
+                                Some(&tracker),
+                                "runtime_setup",
+                            )
+                            .await
+                        };
+                        
+                        match result {
+                            Ok(()) => {
                                 state_signal.write().set_dxvk_ready(true);
                                 debug!("DXVK downloaded successfully");
                             }
-                            Err(_e) => {
-                                debug_error!("Failed to download DXVK: {}", _e);
+                            Err(ref e) => {
+                                debug_error!("Failed to download DXVK: {}", e);
                                 tracker.clear("runtime_setup");
                                 state_signal.write().set_runtime_active(false);
                                 return;
                             }
                         }
                     }
+                    result
                 }
                 super::state::RunnerType::Proton => {
+                    let mut result = Ok(());
+                    
                     if !state_signal.read().component_setup.proton_ready {
                         debug!("Downloading Proton runtime components...");
 
-                        match backend::runners::Runners::download_proton_runtime(
-                            &settings_guard,
-                            &mut *component_manager,
-                            Some(&tracker),
-                            "runtime_setup",
-                        )
-                        .await
-                        {
-                            Ok(_) => {
+                        result = {
+                            let mut component_manager = manager_arc.write().await;
+                            backend::runners::Runners::download_proton_runtime(
+                                &settings_data,
+                                &mut component_manager,
+                                Some(&tracker),
+                                "runtime_setup",
+                            )
+                            .await
+                        };
+                        
+                        match result {
+                            Ok(()) => {
                                 debug!("UMU and SteamRT downloaded successfully");
                             }
-                            Err(_e) => {
-                                debug_error!("Failed to download UMU/SteamRT: {}", _e);
+                            Err(ref e) => {
+                                debug_error!("Failed to download UMU/SteamRT: {}", e);
                                 tracker.clear("runtime_setup");
                                 state_signal.write().set_runtime_active(false);
                                 return;
@@ -273,34 +281,42 @@ pub fn create_component_setup_handler(
 
                         debug!("Step 3/3: Downloading Proton...");
 
-                        match backend::runners::Runners::download_proton(
-                            &settings_guard,
-                            &mut *component_manager,
-                            None,
-                            Some(&tracker),
-                            "runtime_setup",
-                        )
-                        .await
-                        {
-                            Ok(_) => {
+                        result = {
+                            let mut component_manager = manager_arc.write().await;
+                            backend::runners::Runners::download_proton(
+                                &settings_data,
+                                &mut component_manager,
+                                None,
+                                Some(&tracker),
+                                "runtime_setup",
+                            )
+                            .await
+                        };
+                        
+                        match result {
+                            Ok(()) => {
                                 state_signal.write().set_proton_ready(true);
                                 debug!("All Proton components downloaded successfully");
                             }
-                            Err(_e) => {
-                                debug_error!("Failed to download Proton: {}", _e);
+                            Err(ref e) => {
+                                debug_error!("Failed to download Proton: {}", e);
                                 tracker.clear("runtime_setup");
                                 state_signal.write().set_runtime_active(false);
                                 return;
                             }
                         }
                     }
+                    result
                 }
-            }
+            };
 
-            drop(settings_guard);
-            if let Ok(s) = settings_arc.read() {
-                let new_status = SystemStatus::check(&s).await;
-                system_status.set(Some(new_status));
+            if setup_result.is_ok() {
+                // Clone settings data before await to avoid holding lock
+                let settings_data = settings_arc.read().ok().map(|guard| guard.clone());
+                if let Some(settings) = settings_data {
+                    let new_status = SystemStatus::check(&settings).await;
+                    system_status.set(Some(new_status));
+                }
             }
 
             tracker.clear("runtime_setup");
@@ -337,27 +353,26 @@ pub fn create_tweaks_setup_handler(
         tracker.report(
             "tweaks_setup",
             "Initializing Tweaks Setup",
-            0,
-            0,
-            true,
-            None,
-            None,
+            backend::progress::ReportParams {
+                downloaded: 0,
+                total: 0,
+                is_busy: true,
+                step_index: None,
+                total_steps: None,
+            },
         );
 
         spawn(async move {
-            let settings_guard = match settings_arc.read() {
-                Ok(s) => s,
-                Err(_) => {
-                    state_signal.write().set_tweaks_active(&game_id_clone, false);
-                    return;
-                }
+            let settings_data = if let Ok(s) = settings_arc.read() { s.clone() } else {
+                state_signal.write().set_tweaks_active(&game_id_clone, false);
+                return;
             };
 
             // Re-check if Jadeite (tweaks) is already installed before downloading
             let jadeite_installed = service.is_installed(
-                &settings_guard,
+                &settings_data,
                 backend::components::ComponentType::Jadeite,
-            );
+            ).await;
             state_signal.write().set_tweaks_ready(&game_id_clone, jadeite_installed);
             
             if jadeite_installed {
@@ -367,55 +382,61 @@ pub fn create_tweaks_setup_handler(
             }
 
             let manager_arc = service.manager();
-            let mut component_manager = match manager_arc.try_write() {
-                Ok(cm) => cm,
-                Err(_) => {
-                    debug_error!(
-                        "ComponentManager is busy, please wait for current download to finish"
-                    );
-                    state_signal.write().set_tweaks_active(&game_id_clone, false);
-                    tracker.report("tweaks_setup", "Tweaks Setup", 0, 0, false, None, None);
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                    tracker.clear("tweaks_setup");
-                    return;
-                }
+            
+            // Note: tokio::sync::RwLock always succeeds in acquiring locks eventually
+            // There's no need to check availability as the lock is async-aware
+
+            // Refresh component in a scope
+            let refresh_result = {
+                let mut component_manager = manager_arc.write().await;
+                component_manager
+                    .refresh_component(ComponentType::Jadeite)
+                    .await
             };
 
-            if let Err(_e) = component_manager
-                .refresh_component(ComponentType::Jadeite)
-                .await
-            {
-                debug_error!("Failed to refresh Jadeite: {}", _e);
+            if let Err(e) = refresh_result {
+                debug_error!("Failed to refresh Jadeite: {}", e);
                 state_signal.write().set_tweaks_active(&game_id_clone, false);
                 tracker.clear("tweaks_setup");
                 return;
             }
 
-            // Download Jadeite using ComponentManager
-            match component_manager
-                .download_jadeite(
-                    &settings_guard,
-                    None,
-                    Some(Box::new({
-                        let tracker = tracker.clone();
-                        move |current, total| {
-                            tracker.report("tweaks_setup", "Jadeite", current, total, true, None, None);
-                        }
-                    })),
-                )
-                .await
-            {
+            // Download Jadeite in a scope
+            let download_result = {
+                let component_manager = manager_arc.read().await;
+                component_manager
+                    .download_jadeite(
+                        &settings_data,
+                        None,
+                        Some(Box::new({
+                            let tracker = tracker.clone();
+                            move |current, total| {
+                                tracker.report("tweaks_setup", "Jadeite", backend::progress::ReportParams {
+                                    downloaded: current,
+                                    total,
+                                    is_busy: true,
+                                    step_index: None,
+                                    total_steps: None,
+                                });
+                            }
+                        })),
+                    )
+                    .await
+            };
+
+            match download_result {
                 Ok(_) => {
                     state_signal.write().set_tweaks_ready(&game_id_clone, true);
 
-                    drop(settings_guard);
-                    if let Ok(s) = settings_arc.read() {
-                        let new_status = SystemStatus::check(&s).await;
+                    // Clone settings data before await to avoid holding lock
+                    let settings_data = settings_arc.read().ok().map(|guard| guard.clone());
+                    if let Some(settings) = settings_data {
+                        let new_status = SystemStatus::check(&settings).await;
                         system_status.set(Some(new_status));
                     }
                 }
-                Err(_e) => {
-                    debug_error!("Failed to download Jadeite: {}", _e);
+                Err(e) => {
+                    debug_error!("Failed to download Jadeite: {}", e);
                 }
             }
 

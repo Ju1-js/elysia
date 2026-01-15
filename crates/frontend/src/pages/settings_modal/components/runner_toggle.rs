@@ -1,5 +1,5 @@
-use super::super::styles::*;
-use super::super::types::*;
+use super::super::styles::{INTERACTIVE_BG_SELECTED, INTERACTIVE_BG_HOVER, TEXT_SELECTED, TEXT_HOVER, TEXT_SECONDARY};
+use super::super::types::RunnerType;
 use freya::prelude::*;
 
 /// Toggle button for selecting runner type (Wine/Proton)

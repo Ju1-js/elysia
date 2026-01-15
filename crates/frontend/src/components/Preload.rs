@@ -1,5 +1,6 @@
 use bytes::Bytes;
 use reqwest::Url;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
 use super::fetch_image;
@@ -7,7 +8,7 @@ use super::fetch_image;
 /// Preload images into the cache
 pub fn preload_images(urls: Vec<Url>, cache_path: String) {
     tokio::spawn(async move {
-        for url in urls.into_iter() {
+        for url in urls {
             let key = url.to_string();
 
             if cacache::read(&cache_path, &key).await.is_ok() {
@@ -35,7 +36,6 @@ pub fn preload_videos(urls: Vec<Url>, cache_dir: PathBuf, max_videos: usize) {
         for url in urls.into_iter().take(max_videos) {
             let url_str = url.to_string();
 
-            use std::hash::{Hash, Hasher};
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             url_str.hash(&mut hasher);
 
@@ -47,8 +47,8 @@ pub fn preload_videos(urls: Vec<Url>, cache_dir: PathBuf, max_videos: usize) {
 
             let temp_path = cache_path.with_extension("tmp");
 
-            if let Ok(response) = reqwest::get(url).await {
-                if let Ok(mut file) = tokio::fs::File::create(&temp_path).await {
+            if let Ok(response) = reqwest::get(url).await
+                && let Ok(mut file) = tokio::fs::File::create(&temp_path).await {
                     use tokio::io::AsyncWriteExt;
                     use tokio_stream::StreamExt;
 
@@ -79,7 +79,6 @@ pub fn preload_videos(urls: Vec<Url>, cache_dir: PathBuf, max_videos: usize) {
                         let _ = tokio::fs::remove_file(&temp_path).await;
                     }
                 }
-            }
 
             tokio::task::yield_now().await;
         }

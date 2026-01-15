@@ -20,7 +20,7 @@ pub fn MyAnimatedCarousel(props: MyAnimatedCarouselProps) -> Element {
     let (reference, node_size) = use_node_signal();
 
     let mut state = use_signal(|| {
-        let initial_index = selected.as_ref().map(|s| s()).unwrap_or(0);
+        let initial_index = selected.as_ref().map_or(0, |s| s());
         CarouselState::Stopped(initial_index)
     });
 
@@ -28,11 +28,10 @@ pub fn MyAnimatedCarousel(props: MyAnimatedCarouselProps) -> Element {
         if let Some(sel) = selected {
             let external_index = sel();
             let current_state = *state.read();
-            if let CarouselState::Stopped(internal_index) = current_state {
-                if internal_index != external_index {
+            if let CarouselState::Stopped(internal_index) = current_state
+                && internal_index != external_index {
                     *state.write() = CarouselState::Running(internal_index, external_index);
                 }
-            }
         }
     });
 
@@ -62,7 +61,7 @@ pub fn MyAnimatedCarousel(props: MyAnimatedCarouselProps) -> Element {
                 }
             }
             CarouselState::Running(_, _) => {}
-        };
+        }
     };
 
     rsx!(
@@ -103,7 +102,7 @@ fn Carousel(
             CarouselState::Stopped(_) => {
                 animation.reset();
             }
-        };
+        }
     });
 
     let opacity = animation.get().read().read();

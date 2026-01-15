@@ -1,5 +1,5 @@
-use super::super::styles::*;
-use super::super::types::*;
+use super::super::styles::{INTERACTIVE_BG_HOVER, INTERACTIVE_BORDER_SELECTED, TEXT_SELECTED, TEXT_HOVER, TEXT_SECONDARY};
+use super::super::types::SettingsPage;
 use freya::prelude::*;
 
 /// Sidebar option for selecting settings pages

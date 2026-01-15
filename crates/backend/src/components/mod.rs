@@ -30,7 +30,7 @@ pub enum ComponentType {
 }
 
 impl ComponentType {
-    fn name(&self) -> &'static str {
+    fn name(self) -> &'static str {
         match self {
             ComponentType::Dxvk => "dxvk",
             ComponentType::Jadeite => "jadeite",
@@ -41,7 +41,7 @@ impl ComponentType {
         }
     }
 
-    fn display_name(&self) -> &'static str {
+    fn display_name(self) -> &'static str {
         match self {
             ComponentType::Dxvk => "DXVK",
             ComponentType::Jadeite => "Jadeite",
@@ -81,12 +81,15 @@ pub struct ComponentManager {
 }
 
 impl ComponentManager {
+    #[allow(clippy::unused_async)]
     pub async fn new() -> Self {
         Self {
             cache: VersionCache::default(),
         }
     }
 
+    /// # Errors
+    /// Returns an error if fetching versions fails.
     pub async fn refresh_index(&mut self) -> Result<()> {
         let types = [
             ComponentType::Dxvk,
@@ -107,19 +110,22 @@ impl ComponentManager {
                     self.cache.entries.insert(component_type, versions);
                 }
                 Err(err) => {
-                    eprintln!("Failed to fetch versions for {:?}: {}", component_type, err);
+                    eprintln!("Failed to fetch versions for {component_type:?}: {err}");
                 }
             }
         }
         Ok(())
     }
 
+    /// # Errors
+    /// Returns an error if fetching versions fails.
     pub async fn refresh_component(&mut self, component_type: ComponentType) -> Result<()> {
         let versions = component_type.fetch_versions().await?;
         self.cache.entries.insert(component_type, versions);
         Ok(())
     }
 
+    #[must_use] 
     pub fn is_installed(&self, settings: &GlobalSettings, component_type: ComponentType) -> bool {
         let base_dir = settings.components_directory.join(component_type.name());
 
@@ -132,12 +138,13 @@ impl ComponentManager {
             .ok()
             .and_then(|entries| {
                 entries
-                    .filter_map(|e| e.ok())
+                    .filter_map(std::result::Result::ok)
                     .find(|e| e.path().is_dir())
             })
             .is_some()
     }
 
+    #[must_use] 
     pub fn get_installed_version(
         &self,
         settings: &GlobalSettings,
@@ -152,15 +159,14 @@ impl ComponentManager {
             .and_then(|e| e.file_name().to_str().map(String::from))
     }
 
+    #[must_use] 
     pub fn get_latest_version(&self, component_type: ComponentType) -> Option<&ComponentVersion> {
         self.cache.entries.get(&component_type)?.first()
     }
 
+    #[must_use] 
     pub fn needs_update(&self, settings: &GlobalSettings, component_type: ComponentType) -> bool {
-        let installed = match self.get_installed_version(settings, component_type) {
-            Some(v) => v,
-            None => return false,
-        };
+        let Some(installed) = self.get_installed_version(settings, component_type) else { return false };
 
         let latest = match self.get_latest_version(component_type) {
             Some(v) => &v.version,
@@ -170,6 +176,10 @@ impl ComponentManager {
         installed != *latest
     }
 
+    /// # Errors
+    /// Returns an error if download or installation fails.
+    /// # Panics
+    /// Panics if the destination directory has no parent directory.
     pub async fn download_component(
         &self,
         settings: &GlobalSettings,
@@ -182,10 +192,10 @@ impl ComponentManager {
                 .entries
                 .get(&component_type)
                 .and_then(|versions| versions.iter().find(|v| v.version == ver))
-                .ok_or_else(|| anyhow::anyhow!("Version {} not found in cache", ver))?
+                .ok_or_else(|| anyhow::anyhow!("Version {ver} not found in cache"))?
         } else {
             self.get_latest_version(component_type)
-                .ok_or_else(|| anyhow::anyhow!("No versions available for {:?}", component_type))?
+                .ok_or_else(|| anyhow::anyhow!("No versions available for {component_type:?}"))?
         };
 
         println!(
@@ -197,7 +207,7 @@ impl ComponentManager {
         let filename = component_version
             .download_url
             .path_segments()
-            .and_then(|segments| segments.last())
+            .and_then(|mut segments| segments.next_back())
             .ok_or_else(|| anyhow::anyhow!("Invalid download URL"))?;
         let archive_path = temp_dir.join(filename);
 
@@ -237,7 +247,7 @@ impl ComponentManager {
 
         // Fix double-nesting: if dest_dir only contains a single directory, flatten it
         let entries: Vec<_> = std::fs::read_dir(&dest_dir)?
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
         
         if entries.len() == 1 && entries[0].path().is_dir() {
@@ -263,15 +273,17 @@ impl ComponentManager {
         }
 
         println!(
-            "✅ {} version {} installed to {:?}",
+            "✅ {} version {} installed to {}",
             component_type.display_name(),
             component_version.version,
-            dest_dir
+            dest_dir.display()
         );
 
         Ok(dest_dir)
     }
 
+    /// # Errors
+    /// Returns an error if cleanup fails.
     pub fn cleanup_old_versions(
         &self,
         settings: &GlobalSettings,
@@ -295,24 +307,24 @@ impl ComponentManager {
 
         for entry in std::fs::read_dir(&base_dir)?.flatten() {
             let path = entry.path();
-            if path.is_dir() {
-                if let Some(version) = path.file_name().and_then(|s| s.to_str()) {
-                    if version != latest {
-                        println!(
-                            "Removing old {} version: {}",
-                            component_type.display_name(),
-                            version
-                        );
-                        std::fs::remove_dir_all(&path)?;
-                    }
+            if path.is_dir()
+                && let Some(version) = path.file_name().and_then(|s| s.to_str())
+                && version != latest {
+                    println!(
+                        "Removing old {} version: {}",
+                        component_type.display_name(),
+                        version
+                    );
+                    std::fs::remove_dir_all(&path)?;
                 }
-            }
         }
 
         Ok(())
     }
 
     /// Download Jadeite (tweaks/anti-cheat compatibility layer)
+    /// # Errors
+    /// Returns an error if download fails.
     pub async fn download_jadeite(
         &self,
         settings: &GlobalSettings,
@@ -341,8 +353,7 @@ fn extract_archive(archive_path: &PathBuf, dest_dir: &PathBuf) -> Result<()> {
         Some("zip") => zip::ZipArchive::new(file)?.extract(dest_dir)?,
         _ => {
             return Err(anyhow::anyhow!(
-                "Unsupported archive format: {:?}",
-                extension
+                "Unsupported archive format: {extension:?}"
             ));
         }
     }

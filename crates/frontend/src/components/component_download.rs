@@ -21,6 +21,7 @@ pub fn ComponentDownloadWidget(progress: Signal<Option<ComponentDownloadProgress
 
     let p = prog.as_ref().unwrap();
 
+    #[allow(clippy::cast_precision_loss)]
     let pct = if p.total > 0 {
         (p.downloaded as f64 / p.total as f64) * 100.0
     } else {
@@ -28,9 +29,11 @@ pub fn ComponentDownloadWidget(progress: Signal<Option<ComponentDownloadProgress
     };
 
     let size_info = if p.total > 0 {
+        #[allow(clippy::cast_precision_loss)]
         let dl_mb = p.downloaded as f64 / 1_000_000.0;
+        #[allow(clippy::cast_precision_loss)]
         let total_mb = p.total as f64 / 1_000_000.0;
-        format!("{:.1} MB / {:.1} MB", dl_mb, total_mb)
+        format!("{dl_mb:.1} MB / {total_mb:.1} MB")
     } else {
         String::new()
     };

@@ -50,10 +50,10 @@ pub fn MyButton(props: MyButtonProps) -> Element {
                         trigger_button: Some(MouseButton::Left),
                     } => true,
                     PointerType::Touch { phase, .. } => phase == TouchPhase::Ended,
-                    _ => false,
+                    PointerType::Mouse { .. } => false,
                 };
                 if is_valid {
-                    onpress.call(PressEvent::Pointer(ev))
+                    onpress.call(PressEvent::Pointer(ev));
                 }
             }
         }
@@ -88,7 +88,7 @@ pub fn MyButton(props: MyButtonProps) -> Element {
             && enabled
             && let Some(onpress) = &onpress
         {
-            onpress.call(PressEvent::Key(ev))
+            onpress.call(PressEvent::Key(ev));
         }
     };
 
@@ -99,9 +99,9 @@ pub fn MyButton(props: MyButtonProps) -> Element {
     let border = if focus.is_focused_with_keyboard() {
         format!("2 inner {focus_border_fill}")
     } else if is_hovering {
-        format!("1 inner rgb(255, 255, 255, 0.3)")
+        "1 inner rgb(255, 255, 255, 0.3)".to_string()
     } else {
-        format!("1 inner rgb(255, 255, 255, 0.15)")
+        "1 inner rgb(255, 255, 255, 0.15)".to_string()
     };
 
     let shadow = if is_hovering {

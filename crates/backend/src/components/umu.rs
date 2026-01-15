@@ -13,7 +13,7 @@ pub async fn fetch_versions() -> Result<Vec<ComponentVersion>> {
             let version = &rel.tag_name;
             rel.assets
                 .iter()
-                .find(|asset| asset.name == format!("umu-launcher-{}-zipapp.tar", version))
+                .find(|asset| asset.name == format!("umu-launcher-{version}-zipapp.tar"))
                 .and_then(|asset| {
                     Some(ComponentVersion {
                         version: rel.tag_name.clone(),

@@ -53,7 +53,7 @@ fn FromRouteToCurrent(
     });
 
     use_memo(use_reactive((&upwards, &from), move |_| {
-        animations.run(AnimDirection::Forward)
+        animations.run(AnimDirection::Forward);
     }));
 
     use_effect(move || {
@@ -225,7 +225,7 @@ fn AppLayout() -> Element {
                             spacing: "12",
                             height: "80%",
                             if let Some(ctx) = &ctx_option {
-                                for link in make_links(&ctx.api_games, selected_game_id, navigator.clone()) {
+                                for link in make_links(&ctx.api_games, selected_game_id, navigator) {
                                     {link}
                                 }
                             } else {

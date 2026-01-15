@@ -17,42 +17,55 @@ pub struct ProgressTracker {
     progress: Arc<RwLock<HashMap<String, ComponentProgress>>>,
 }
 
+#[derive(Copy, Clone)]
+pub struct ReportParams {
+    pub downloaded: u64,
+    pub total: u64,
+    pub is_busy: bool,
+    pub step_index: Option<usize>,
+    pub total_steps: Option<usize>,
+}
+
 impl ProgressTracker {
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             progress: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
+    /// # Panics
+    /// Panics if the lock is poisoned.
     pub fn report(
         &self,
         key: &str,
         component_name: &str,
-        downloaded: u64,
-        total: u64,
-        is_busy: bool,
-        step_index: Option<usize>,
-        total_steps: Option<usize>,
+        params: ReportParams,
     ) {
         let progress = ComponentProgress {
             component_name: component_name.to_string(),
-            downloaded,
-            total,
-            is_busy,
+            downloaded: params.downloaded,
+            total: params.total,
+            is_busy: params.is_busy,
             is_finished: false,
-            step_index,
-            total_steps,
+            step_index: params.step_index,
+            total_steps: params.total_steps,
         };
 
         let mut map = self.progress.write().unwrap();
         map.insert(key.to_string(), progress);
     }
 
+    /// # Panics
+    /// Panics if the lock is poisoned.
+    #[must_use] 
     pub fn get(&self, key: &str) -> Option<ComponentProgress> {
         let map = self.progress.read().unwrap();
         map.get(key).cloned()
     }
 
+    /// # Panics
+    /// Panics if the lock is poisoned.
     pub fn finish(&self, key: &str) {
         let mut map = self.progress.write().unwrap();
         if let Some(progress) = map.get_mut(key) {
@@ -61,6 +74,8 @@ impl ProgressTracker {
         }
     }
 
+    /// # Panics
+    /// Panics if the lock is poisoned.
     pub fn clear(&self, key: &str) {
         let mut map = self.progress.write().unwrap();
         map.remove(key);

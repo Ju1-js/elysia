@@ -1,4 +1,4 @@
-use super::super::styles::*;
+use super::super::styles::{INTERACTIVE_BG, INTERACTIVE_BG_DISABLED, TEXT_PRIMARY, TEXT_DISABLED, TEXT_SECONDARY, INTERACTIVE_BORDER};
 use super::super::types::*;
 use freya::prelude::*;
 
@@ -64,10 +64,10 @@ pub fn ToggleOption(
             }
 
             Switch {
-                enabled: if available { enabled.read().clone() } else { false },
-                ontoggled: move |_| {
+                enabled: if available { *enabled.read() } else { false },
+                ontoggled: move |()| {
                     if available {
-                        let current = enabled.read().clone();
+                        let current = *enabled.read();
                         enabled.set(!current);
                     }
                 }

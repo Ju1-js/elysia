@@ -4,50 +4,25 @@ use backend::settings::InstalledGame;
 use freya::prelude::*;
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct GameDownloadState {
     pub active: bool,
     pub progress: Option<DownloadProgress>,
     pub installed: bool,
 }
 
-impl Default for GameDownloadState {
-    fn default() -> Self {
-        Self {
-            active: false,
-            progress: None,
-            installed: false,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum RunnerType {
     Wine,
+    #[default]
     Proton,
 }
 
-impl Default for RunnerType {
-    fn default() -> Self {
-        RunnerType::Proton
-    }
-}
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ComponentSetupState {
     pub wine_ready: bool,
     pub dxvk_ready: bool,
     pub proton_ready: bool,
-}
-
-impl Default for ComponentSetupState {
-    fn default() -> Self {
-        Self {
-            wine_ready: false,
-            dxvk_ready: false,
-            proton_ready: false,
-        }
-    }
 }
 
 impl ComponentSetupState {
@@ -71,29 +46,20 @@ impl ComponentSetupState {
                 missing
             }
             RunnerType::Proton => {
-                if !self.proton_ready {
-                    vec!["Proton"]
-                } else {
+                if self.proton_ready {
                     vec![]
+                } else {
+                    vec!["Proton"]
                 }
             }
         }
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct SetupState {
     pub active: bool,
     pub ready: bool,
-}
-
-impl Default for SetupState {
-    fn default() -> Self {
-        Self {
-            active: false,
-            ready: false,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -174,6 +140,7 @@ impl GlobalGameState {
         self.runtime_setup_active
     }
 
+    #[allow(dead_code)]
     pub fn set_runtime_ready(&mut self, ready: bool) {
         match self.current_runner_type {
             RunnerType::Wine => {
@@ -186,6 +153,7 @@ impl GlobalGameState {
         }
     }
 
+    #[allow(dead_code)]
     pub fn can_use_dxvk(game: &InstalledGame) -> bool {
         matches!(game.runner, Runners::Wine(_))
     }
@@ -226,6 +194,7 @@ impl GlobalGameState {
         self.game_running
     }
 
+    #[allow(dead_code)]
     pub fn get_game_pid(&self) -> Option<u32> {
         self.game_child_pid
     }
@@ -245,28 +214,28 @@ impl GlobalGameState {
             };
             
             match result {
-                Ok(_) => {
+                Ok(()) => {
                     eprintln!("[GameState] Successfully killed via wineserver");
                     self.set_game_running(false, None, None, None);
                     return Ok(());
                 }
                 Err(e) => {
-                    eprintln!("[GameState] wineserver kill failed: {}", e);
+                    eprintln!("[GameState] wineserver kill failed: {e}");
                 }
             }
         }
 
         // Fallback to SIGKILL
         if let Some(pid) = self.game_child_pid {
-            eprintln!("[GameState] Fallback: killing process PID {} with SIGKILL", pid);
+            eprintln!("[GameState] Fallback: killing process PID {pid} with SIGKILL");
             let result = std::process::Command::new("kill")
-                .args(&["-9", &pid.to_string()])
+                .args(["-9", &pid.to_string()])
                 .status();
 
             match result {
                 Ok(status) => {
                     if status.success() {
-                        eprintln!("[GameState] Successfully killed process PID {}", pid);
+                        eprintln!("[GameState] Successfully killed process PID {pid}");
                         self.set_game_running(false, None, None, None);
                         Ok(())
                     } else {
@@ -275,8 +244,8 @@ impl GlobalGameState {
                     }
                 }
                 Err(e) => {
-                    eprintln!("[GameState] Failed to execute kill: {}", e);
-                    Err(format!("Failed to execute kill command: {}", e))
+                    eprintln!("[GameState] Failed to execute kill: {e}");
+                    Err(format!("Failed to execute kill command: {e}"))
                 }
             }
         } else {

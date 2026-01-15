@@ -14,19 +14,22 @@ pub fn Home() -> Element {
     use_effect(use_reactive!(|| {
         let settings_arc = settings.read().clone();
         spawn(async move {
-            if let Ok(s) = settings_arc.read() {
-                debug_info!("Checking system component status...");
-                let status = SystemStatus::check(&s).await;
-                debug_info!(
-                    "Status check complete - Runtime ready: {}, Tweaks ready: {}",
-                    status.runtime_ready(),
-                    status.tweaks_ready()
-                );
-                system_status.set(Some(status));
-            }
+            let settings_data = {
+                let Ok(s) = settings_arc.read() else { return };
+                // Clone the data we need before the await
+                s.clone()
+            };
+            debug_info!("Checking system component status...");
+            let status = SystemStatus::check(&settings_data).await;
+            debug_info!(
+                "Status check complete - Runtime ready: {}, Tweaks ready: {}",
+                status.runtime_ready(),
+                status.tweaks_ready()
+            );
+            system_status.set(Some(status));
         });
     }));
-
+    
     rsx! {
         rect {
             width: "fill",

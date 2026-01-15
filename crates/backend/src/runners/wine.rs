@@ -21,12 +21,15 @@ impl Runner for Wine {
 
 impl Wine {
     /// Kill a Wine process using wineserver
+    /// # Errors
+    /// Returns an error if wineserver cannot be executed.
     pub fn kill_wine_process(wine_path: &str, prefix_path: &str) -> Result<()> {
         let wineserver_path = std::path::Path::new(wine_path).join("bin/wineserver");
         kill_wineserver(&wineserver_path, prefix_path)
     }
 
     /// Setup DXVK by copying DLLs to the Wine prefix
+    #[allow(clippy::unused_self)]
     fn setup_dxvk(&self, settings: &GlobalSettings, game: &InstalledGame) -> Result<Vec<String>> {
         let dxvk_dir = settings.components_directory.join("dxvk");
         
@@ -35,7 +38,7 @@ impl Wine {
             .ok()
             .and_then(|entries| {
                 entries
-                    .filter_map(|e| e.ok())
+                    .filter_map(std::result::Result::ok)
                     .find(|e| e.path().is_dir())
                     .map(|e| e.path())
             });
@@ -55,14 +58,14 @@ impl Wine {
         let mut dll_overrides = Vec::new();
 
         for dll_name in &dxvk_dlls {
-            let dll_file = format!("{}.dll", dll_name);
+            let dll_file = format!("{dll_name}.dll");
 
             // Copy 64-bit DLL
             let src_x64 = dxvk_path.join("x64").join(&dll_file);
             let dst_x64 = system32.join(&dll_file);
             if src_x64.exists() {
                 std::fs::copy(&src_x64, &dst_x64)
-                    .with_context(|| format!("Failed to copy {} to system32", dll_file))?;
+                    .with_context(|| format!("Failed to copy {dll_file} to system32"))?;
             }
 
             // Copy 32-bit DLL
@@ -70,16 +73,17 @@ impl Wine {
             let dst_x32 = syswow64.join(&dll_file);
             if src_x32.exists() {
                 std::fs::copy(&src_x32, &dst_x32)
-                    .with_context(|| format!("Failed to copy {} to syswow64", dll_file))?;
+                    .with_context(|| format!("Failed to copy {dll_file} to syswow64"))?;
             }
 
-            dll_overrides.push(format!("{}=n", dll_name));
+            dll_overrides.push(format!("{dll_name}=n"));
         }
 
         Ok(dll_overrides)
     }
 
     /// Build the wine command with optional Jadeite injection
+    #[allow(clippy::unused_self)]
     fn build_wine_command(
         &self,
         settings: &GlobalSettings,
@@ -97,7 +101,7 @@ impl Wine {
             // Look for Jadeite in version subdirectories first, then fall back to base directory
             let jade = std::fs::read_dir(&jadeite_dir)
                 .context("Failed to read jadeite directory")?
-                .filter_map(|entry| entry.ok())
+                .filter_map(std::result::Result::ok)
                 .find(|entry| {
                     let path = entry.path();
                     // Check if this is a version directory with jadeite.exe
@@ -122,7 +126,7 @@ impl Wine {
         );
 
         if let Some(ref args) = game.command_arguments {
-            wine_args.extend(args.iter().map(|s| s.to_string()));
+            wine_args.extend(args.iter().cloned());
         }
 
         Ok(wine_args)
@@ -130,7 +134,7 @@ impl Wine {
 
     /// Apply command wrapper if specified
     fn apply_command_wrapper(
-        wine_args: Vec<String>,
+        wine_args: &[String],
         wrapper: Option<&String>,
     ) -> (String, Vec<String>) {
         if let Some(wrapper) = wrapper {
@@ -169,7 +173,7 @@ impl Wine {
 
         // Apply command wrapper if specified
         let (final_program, final_args) =
-            Self::apply_command_wrapper(wine_args, game.command_wrapper.as_ref());
+            Self::apply_command_wrapper(&wine_args, game.command_wrapper.as_ref());
 
         // Build the command
         let mut cmd = Command::new(&final_program);
@@ -210,8 +214,7 @@ impl Wine {
         }
 
         println!(
-            "Running: WINEPREFIX=\"{}\" {} {:?}",
-            prefix, final_program, final_args
+            "Running: WINEPREFIX=\"{prefix}\" {final_program} {final_args:?}"
         );
 
         let child = cmd.spawn()

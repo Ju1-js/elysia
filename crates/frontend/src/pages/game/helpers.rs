@@ -1,11 +1,18 @@
 use crate::components::DownloadProgress;
 use backend::{
-    game_providers::installer::InstallerManager, runners::Runner, settings::GlobalSettings,
+    game_providers::installer::InstallerManager, 
+    progress::ProgressTracker,
+    runners::Runner, 
+    settings::GlobalSettings,
 };
 use freya::prelude::*;
+use dioxus::prelude::*;
 use std::sync::{Arc, RwLock};
+use std::rc::Rc;
 
 use super::state::GlobalGameStateSignal;
+
+type DownloadProgressGetter = Rc<dyn Fn(&str) -> Option<DownloadProgress>>;
 
 /// Create a progress getter for game download progress tracking
 pub fn create_progress_getter(
@@ -14,9 +21,9 @@ pub fn create_progress_getter(
     biz: String,
 ) -> (
     String,
-    std::rc::Rc<dyn Fn(&str) -> Option<DownloadProgress>>,
+    DownloadProgressGetter,
 ) {
-    let key = format!("{}_streaming", game_id);
+    let key = format!("{game_id}_streaming");
     let getter = std::rc::Rc::new(move |progress_key: &str| {
         let settings_guard = settings.read();
         let settings_data = settings_guard.read().ok()?;
@@ -24,14 +31,14 @@ pub fn create_progress_getter(
             &game_id,
             &biz,
             settings_data.temp_directory.clone(),
-            settings_data.components_directory.clone(),
+            &settings_data.components_directory,
         )?;
         installer
             .get_progress(progress_key)
             .map(|p| DownloadProgress {
                 downloaded: p.downloaded,
                 total: p.total,
-                speed_mb_s: p.mb_s as f64,
+                speed_mb_s: f64::from(p.mb_s),
                 status: p.status,
                 is_busy: p.is_busy,
             })
@@ -41,6 +48,7 @@ pub fn create_progress_getter(
 }
 
 /// Create an event handler for game download and launching
+#[allow(clippy::too_many_lines)]
 pub fn create_game_download_handler(
     settings: Signal<Arc<RwLock<GlobalSettings>>>,
     game_id: String,
@@ -55,12 +63,9 @@ pub fn create_game_download_handler(
 
         // CRITICAL: Always check actual settings.installed_games, not just state signal
         // The state signal can be stale when switching between games
-        let settings_guard = match settings_arc.read() {
-            Ok(s) => s,
-            Err(_) => {
-                eprintln!("[Game Handler] Failed to read settings");
-                return;
-            }
+        let Ok(settings_guard) = settings_arc.read() else {
+            eprintln!("[Game Handler] Failed to read settings");
+            return;
         };
 
         let is_actually_installed = settings_guard.installed_games.contains_key(&game_id);
@@ -69,17 +74,17 @@ pub fn create_game_download_handler(
             "[Game Handler] game_id: {}, is_actually_installed: {}, has_entry: {}",
             game_id,
             is_actually_installed,
-            settings_guard.installed_games.get(&game_id).is_some()
+            settings_guard.installed_games.contains_key(&game_id)
         );
 
         if is_actually_installed {
             // Game is installed - LAUNCH IT
             let Some(installed_game) = settings_guard.installed_games.get(&game_id) else {
-                eprintln!("[Game Launch] ERROR: Game {} in installed_games but get() returned None!", game_id);
+                eprintln!("[Game Launch] ERROR: Game {game_id} in installed_games but get() returned None!");
                 return;
             };
 
-            eprintln!("[Game Launch] Launching game: {}", game_id);
+            eprintln!("[Game Launch] Launching game: {game_id}");
             
             // Extract wine info (both path and prefix) if using Wine runner
             let (wine_path_opt, wine_prefix_opt) = match &installed_game.runner {
@@ -102,7 +107,7 @@ pub fn create_game_download_handler(
             {
                 Ok(child) => {
                     let pid = child.id();
-                    eprintln!("[Game Launch] Game process started with PID: {}, waiting for completion...", pid);
+                    eprintln!("[Game Launch] Game process started with PID: {pid}, waiting for completion...");
                     
                     // Set game running state with PID, wine_path, and wine_prefix
                     game_state.write().set_game_running(true, Some(pid), wine_path_opt, wine_prefix_opt);
@@ -121,13 +126,13 @@ pub fn create_game_download_handler(
                         
                         match result {
                             Ok(Ok(status)) => {
-                                eprintln!("[Game Launch] Game exited with status: {:?}", status);
+                                eprintln!("[Game Launch] Game exited with status: {status:?}");
                             }
                             Ok(Err(e)) => {
-                                eprintln!("[Game Launch] Error waiting for game process: {}", e);
+                                eprintln!("[Game Launch] Error waiting for game process: {e}");
                             }
                             Err(e) => {
-                                eprintln!("[Game Launch] Task join error: {}", e);
+                                eprintln!("[Game Launch] Task join error: {e}");
                             }
                         }
                         
@@ -140,7 +145,7 @@ pub fn create_game_download_handler(
                     });
                 }
                 Err(e) => {
-                    eprintln!("[Game Launch] Failed to run game: {}", e);
+                    eprintln!("[Game Launch] Failed to run game: {e}");
                     // Clear running state if launch failed
                     game_state.write().set_game_running(false, None, None, None);
                 }
@@ -149,7 +154,7 @@ pub fn create_game_download_handler(
         }
 
         // Game is NOT installed - DOWNLOAD IT
-        eprintln!("[Game Download] Starting download for game: {}", game_id);
+        eprintln!("[Game Download] Starting download for game: {game_id}");
         
         drop(settings_guard);
         
@@ -163,21 +168,18 @@ pub fn create_game_download_handler(
 
         spawn(async move {
             let installer = {
-                let settings_guard = match settings_arc.read() {
-                    Ok(s) => s,
-                    Err(_) => {
-                        state_signal
-                            .write()
-                            .set_download_active(&game_id_clone, false);
-                        return;
-                    }
+                let Ok(settings_guard) = settings_arc.read() else {
+                    state_signal
+                        .write()
+                        .set_download_active(&game_id_clone, false);
+                    return;
                 };
 
                 InstallerManager::create_installer(
                     &game_id_clone,
                     &biz_clone,
                     settings_guard.temp_directory.clone(),
-                    settings_guard.components_directory.clone(),
+                    &settings_guard.components_directory,
                 )
             };
 
@@ -190,7 +192,7 @@ pub fn create_game_download_handler(
                                 .insert(game_id_clone.clone(), installed_game);
 
                             if let Err(e) = settings_guard.save() {
-                                eprintln!("Failed to save settings: {}", e);
+                                eprintln!("Failed to save settings: {e}");
                             } else {
                                 drop(settings_guard);
                                 let new_settings = settings_arc.read().unwrap().clone();
@@ -203,7 +205,7 @@ pub fn create_game_download_handler(
                             .set_download_installed(&game_id_clone, true);
                     }
                     Err(e) => {
-                        eprintln!("Failed to install game: {}", e);
+                        eprintln!("Failed to install game: {e}");
                     }
                 }
             }

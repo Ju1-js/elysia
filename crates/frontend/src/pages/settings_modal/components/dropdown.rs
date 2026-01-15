@@ -1,5 +1,5 @@
-use super::super::styles::*;
-use super::super::types::*;
+use super::super::styles::{INTERACTIVE_BG_HOVER, INTERACTIVE_BG, INTERACTIVE_BORDER, TEXT_PRIMARY, TEXT_SECONDARY, INTERACTIVE_BORDER_SELECTED, TEXT_SELECTED, TEXT_HOVER};
+use super::super::types::ComponentVersionInfo;
 use freya::prelude::*;
 
 #[component]
@@ -21,15 +21,14 @@ pub fn StylizedDropdown(
     let selected_display = options
         .iter()
         .find(|v| v.internal_name == selected)
-        .map(|v| v.display_name.clone())
-        .unwrap_or_else(|| {
+        .map_or_else(|| {
             // If selected is empty and options exist, show first option's display name
             if selected.is_empty() && !options.is_empty() {
                 options[0].display_name.clone()
             } else {
                 selected.clone()
             }
-        });
+        }, |v| v.display_name.clone());
 
     rsx! {
         rect {
@@ -91,7 +90,7 @@ pub fn StylizedDropdown(
                             internal_name: version_info.internal_name.clone(),
                             selected: selected.clone(),
                             on_select: on_select,
-                            on_close: move |_| is_open.set(false),
+                            on_close: move |()| is_open.set(false),
                         }
                     }
                 }

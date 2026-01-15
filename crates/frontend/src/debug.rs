@@ -1,8 +1,8 @@
 /// Centralized debug logging for the frontend
 ///
 /// Provides a consistent debug output format without emojis or verbose formatting.
-/// These macros only output in debug builds (when debug_assertions is enabled).
-
+/// These macros only output in debug builds (when `debug_assertions` is enabled).
+///
 /// Log a debug message (only in debug builds)
 #[macro_export]
 macro_rules! debug {
