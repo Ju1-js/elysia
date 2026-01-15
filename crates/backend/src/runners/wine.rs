@@ -165,6 +165,19 @@ impl Wine {
             .to_string_lossy()
             .into_owned();
 
+        // Create log file path
+        let log_path = settings.components_directory
+            .parent()
+            .unwrap_or(&settings.components_directory)
+            .join("game.log");
+        
+        let log_file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&log_path)
+            .context("Failed to create log file")?;
+
         // Setup DXVK
         let mut dll_overrides = self.setup_dxvk(settings, game)?;
 
@@ -213,9 +226,14 @@ impl Wine {
             cmd.env("MANGOHUD", "1");
         }
 
+        // Redirect stdout and stderr to log file
+        cmd.stdout(log_file.try_clone()?);
+        cmd.stderr(log_file);
+
         println!(
             "Running: WINEPREFIX=\"{prefix}\" {final_program} {final_args:?}"
         );
+        println!("Logging to: {}", log_path.display());
 
         let child = cmd.spawn()
             .with_context(|| format!("Failed to launch game: wine={}, exe={}", 

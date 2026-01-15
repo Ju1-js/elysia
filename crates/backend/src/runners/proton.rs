@@ -138,6 +138,19 @@ impl Proton {
             .to_string_lossy()
             .into_owned();
 
+        // Create log file path
+        let log_path = settings.components_directory
+            .parent()
+            .unwrap_or(&settings.components_directory)
+            .join("game.log");
+        
+        let log_file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&log_path)
+            .context("Failed to create log file")?;
+
         // Find UMU and Steam Runtime
         let umu_run = Self::find_umu_runtime(settings)?;
         let steam_runtime = Self::find_steam_runtime(settings)?;
@@ -183,11 +196,16 @@ impl Proton {
             cmd.env("MANGOHUD", "1");
         }
 
+        // Redirect stdout and stderr to log file
+        cmd.stdout(log_file.try_clone()?);
+        cmd.stderr(log_file);
+
         println!(
             "Running: WINEPREFIX=\"{prefix}\" RUNTIMEPATH=\"{}\" PROTONPATH=\"{}\" {final_program} {final_args:?}",
             steam_runtime.display(),
             proton_path.display()
         );
+        println!("Logging to: {}", log_path.display());
 
         let child = cmd.spawn().context("Failed to launch game")?;
 
