@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use tokio::{fs::File, io::AsyncReadExt};
 
 use crate::{
-    game_providers::hoyoplay::proto::{GameExe, GameInfo, GetGameConfigs, GetGameScanInfo},
+    game_providers::{hoyoplay::proto::{GameExe, GameInfo, GetGameConfigs, GetGameScanInfo}, scanner},
     settings::GlobalSettings,
 };
 
@@ -115,14 +115,14 @@ pub async fn scan_dir(
         exe_set.insert(cfg.exe_file_name.clone());
     }
 
-    let mut found_exes = Vec::new();
-    scan(path, &exe_set, 0, &mut found_exes);
+    // Use the general scanner with depth of 1 (root + immediate subdirectories)
+    let found_exes = scanner::scan_for_executables(path, 1, Some(&exe_set));
 
     let scan_info = get_game_scan_info(settings).await?;
 
     let mut out = Vec::new();
     for exe in &found_exes {
-        let hash = md5(exe).await?;
+        let hash = scanner::calculate_md5(exe).await?;
         for game in &scan_info.game_scan_info {
             let version = game.game_exe_list.iter().find(|v| v.md5 == hash);
 
@@ -138,52 +138,6 @@ pub async fn scan_dir(
     }
 
     Ok(out)
-}
-
-async fn md5(path: &Path) -> Result<String, String> {
-    let mut file = File::open(path)
-        .await
-        .map_err(|e| format!("Failed to open file: {e}"))?;
-    let mut hasher = md5::Context::new();
-    let mut buffer = vec![0; 1024];
-
-    loop {
-        let size = file
-            .read(&mut buffer)
-            .await
-            .map_err(|e| format!("Failed to read file: {e}"))?;
-
-        if size == 0 {
-            break; // EOF
-        }
-
-        hasher.consume(&buffer[..size]);
-    }
-
-    let result = hasher.finalize();
-    let hash_hex = format!("{result:x}");
-
-    Ok(hash_hex)
-}
-
-fn scan(dir: &Path, exe_set: &HashSet<String>, depth: u32, out: &mut Vec<PathBuf>) {
-    if depth > 1 {
-        return;
-    }
-
-    if let Ok(entries) = read_dir(dir) {
-        for entry in entries.into_iter().flatten() {
-            let path = entry.path();
-            if depth == 0 && path.is_dir() {
-                scan(&path, exe_set, depth + 1, out);
-            } else if let Some(file_name) = path.file_name()
-                && let Some(name_str) = file_name.to_str()
-                && exe_set.contains(&name_str.to_string())
-            {
-                out.push(path);
-            }
-        }
-    }
 }
 
 // TODO: cache invalidation on demand

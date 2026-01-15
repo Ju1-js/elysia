@@ -27,3 +27,4 @@ uuid = "1.19.0"
 anyhow.workspace = true
 tokio-stream = "0.1.17"
 tokio-util = "0.7.17"
+rfd = "0.15.1"

@@ -195,7 +195,7 @@ pub fn create_component_setup_handler(
                     
                     if !state_signal.read().component_setup.wine_ready {
                         debug!("Downloading Wine...");
-                        result = {
+                        let wine_result = {
                             let component_manager = manager_arc.read().await;
                             backend::runners::Runners::download_wine(
                                 &settings_data,
@@ -207,23 +207,35 @@ pub fn create_component_setup_handler(
                             .await
                         };
                         
-                        match result {
-                            Ok(()) => {
+                        match &wine_result {
+                            Ok(downloaded_version) => {
                                 state_signal.write().set_wine_ready(true);
-                                debug!("Wine downloaded successfully");
+                                debug!("Wine downloaded successfully: version {}", downloaded_version);
+                                
+                                // Update default_preferences with the downloaded Wine version
+                                if let Ok(mut settings_guard) = settings_arc.write() {
+                                    settings_guard.default_preferences.runner = 
+                                        backend::runners::Runners::Wine(backend::runners::Wine {
+                                            version: downloaded_version.clone(),
+                                        });
+                                    if let Err(e) = settings_guard.save() {
+                                        debug_error!("Failed to save settings after Wine download: {}", e);
+                                    }
+                                }
                             }
-                            Err(ref e) => {
+                            Err(e) => {
                                 debug_error!("Failed to download Wine: {}", e);
                                 tracker.clear("runtime_setup");
                                 state_signal.write().set_runtime_active(false);
                                 return;
                             }
                         }
+                        result = wine_result.map(|_| ());
                     }
 
                     if !state_signal.read().component_setup.dxvk_ready {
                         debug!("Downloading DXVK...");
-                        result = {
+                        let dxvk_result = {
                             let component_manager = manager_arc.read().await;
                             backend::runners::Runners::download_dxvk(
                                 &settings_data,
@@ -235,18 +247,31 @@ pub fn create_component_setup_handler(
                             .await
                         };
                         
-                        match result {
-                            Ok(()) => {
+                        match &dxvk_result {
+                            Ok(downloaded_version) => {
                                 state_signal.write().set_dxvk_ready(true);
-                                debug!("DXVK downloaded successfully");
+                                debug!("DXVK downloaded successfully: version {}", downloaded_version);
+                                
+                                // Update default_preferences with the downloaded DXVK version
+                                if let Ok(mut settings_guard) = settings_arc.write() {
+                                    // Replace or add DXVK to runtime_components
+                                    let mut components = settings_guard.default_preferences.runtime_components.clone();
+                                    components.retain(|c| !matches!(c, backend::settings::RuntimeComponents::Dxvk(_)));
+                                    components.push(backend::settings::RuntimeComponents::Dxvk(downloaded_version.clone()));
+                                    settings_guard.default_preferences.runtime_components = components;
+                                    if let Err(e) = settings_guard.save() {
+                                        debug_error!("Failed to save settings after DXVK download: {}", e);
+                                    }
+                                }
                             }
-                            Err(ref e) => {
+                            Err(e) => {
                                 debug_error!("Failed to download DXVK: {}", e);
                                 tracker.clear("runtime_setup");
                                 state_signal.write().set_runtime_active(false);
                                 return;
                             }
                         }
+                        result = dxvk_result.map(|_| ());
                     }
                     result
                 }
@@ -281,7 +306,7 @@ pub fn create_component_setup_handler(
 
                         debug!("Step 3/3: Downloading Proton...");
 
-                        result = {
+                        let proton_result = {
                             let mut component_manager = manager_arc.write().await;
                             backend::runners::Runners::download_proton(
                                 &settings_data,
@@ -293,18 +318,30 @@ pub fn create_component_setup_handler(
                             .await
                         };
                         
-                        match result {
-                            Ok(()) => {
+                        match &proton_result {
+                            Ok(downloaded_version) => {
                                 state_signal.write().set_proton_ready(true);
-                                debug!("All Proton components downloaded successfully");
+                                debug!("All Proton components downloaded successfully: Proton version {}", downloaded_version);
+                                
+                                // Update default_preferences with the downloaded Proton version
+                                if let Ok(mut settings_guard) = settings_arc.write() {
+                                    settings_guard.default_preferences.runner = 
+                                        backend::runners::Runners::Proton(backend::runners::Proton {
+                                            version: downloaded_version.clone(),
+                                        });
+                                    if let Err(e) = settings_guard.save() {
+                                        debug_error!("Failed to save settings after Proton download: {}", e);
+                                    }
+                                }
                             }
-                            Err(ref e) => {
+                            Err(e) => {
                                 debug_error!("Failed to download Proton: {}", e);
                                 tracker.clear("runtime_setup");
                                 state_signal.write().set_runtime_active(false);
                                 return;
                             }
                         }
+                        result = proton_result.map(|_| ());
                     }
                     result
                 }

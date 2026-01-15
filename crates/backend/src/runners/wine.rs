@@ -1,7 +1,7 @@
 use crate::{
     components::tweaks::TweakManifest,
     runners::{Runner, kill_wineserver, shell_escape},
-    settings::{GlobalSettings, InstalledGame},
+    settings::{GlobalSettings, InstalledGame, RuntimeComponents},
 };
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -24,8 +24,47 @@ impl Wine {
     /// # Errors
     /// Returns an error if wineserver cannot be executed.
     pub fn kill_wine_process(wine_path: &str, prefix_path: &str) -> Result<()> {
-        let wineserver_path = std::path::Path::new(wine_path).join("bin/wineserver");
-        kill_wineserver(&wineserver_path, prefix_path)
+        // For system wine (indicated by /usr/bin path), use wineserver from PATH directly
+        // This is consistent with version_loader.rs which detects system wine at /usr/bin/wine
+        // This allows the system's wineserver to be found via PATH lookup
+        if wine_path == "/usr/bin" || wine_path.ends_with("/usr/bin") {
+            let status = std::process::Command::new("wineserver")
+                .arg("-k")
+                .env("WINEPREFIX", prefix_path)
+                .status()
+                .context("Failed to execute wineserver")?;
+
+            if !status.success() {
+                return Err(anyhow::anyhow!("wineserver -k failed"));
+            }
+            Ok(())
+        } else {
+            let wineserver_path = std::path::Path::new(wine_path).join("bin/wineserver");
+            kill_wineserver(&wineserver_path, prefix_path)
+        }
+    }
+
+    /// Resolve the Wine version to use
+    /// If version is empty, returns the latest installed version (sorted alphabetically)
+    fn resolve_version(&self, settings: &GlobalSettings) -> Result<String> {
+        if !self.version.is_empty() {
+            return Ok(self.version.clone());
+        }
+
+        // Version is empty, find installed versions and pick the latest one
+        let base_dir = settings.components_directory.join("wine");
+        
+        let mut versions: Vec<String> = std::fs::read_dir(&base_dir)
+            .context("Failed to read wine directory")?
+            .filter_map(std::result::Result::ok)
+            .filter(|entry| entry.path().is_dir())
+            .filter_map(|entry| entry.file_name().to_str().map(String::from))
+            .collect();
+        
+        versions.sort();
+        
+        versions.into_iter().next_back()
+            .context("No Wine version installed. Please install Wine from settings.")
     }
 
     /// Setup DXVK by copying DLLs to the Wine prefix
@@ -33,15 +72,37 @@ impl Wine {
     fn setup_dxvk(&self, settings: &GlobalSettings, game: &InstalledGame) -> Result<Vec<String>> {
         let dxvk_dir = settings.components_directory.join("dxvk");
         
-        // Find the first DXVK version directory
-        let dxvk_path = std::fs::read_dir(&dxvk_dir)
-            .ok()
-            .and_then(|entries| {
-                entries
-                    .filter_map(std::result::Result::ok)
-                    .find(|e| e.path().is_dir())
-                    .map(|e| e.path())
+        // Find the DXVK version to use from runtime_components
+        let dxvk_version = game.runtime_components.iter()
+            .find_map(|component| {
+                if let RuntimeComponents::Dxvk(version) = component {
+                    Some(version.clone())
+                } else {
+                    None
+                }
             });
+
+        // Determine the DXVK path: use specified version or fall back to any available
+        let dxvk_path = if let Some(ref version) = dxvk_version {
+            println!("Using DXVK version: {version} (configured)");
+            let version_path = dxvk_dir.join(version);
+            if version_path.exists() && version_path.is_dir() {
+                Some(version_path)
+            } else {
+                None
+            }
+        } else {
+            println!("Using DXVK version: auto (any available)");
+            // No version specified, find any DXVK version directory
+            std::fs::read_dir(&dxvk_dir)
+                .ok()
+                .and_then(|entries| {
+                    entries
+                        .filter_map(std::result::Result::ok)
+                        .find(|e| e.path().is_dir())
+                        .map(|e| e.path())
+                })
+        };
 
         let Some(dxvk_path) = dxvk_path else {
             return Ok(Vec::new());
@@ -155,9 +216,22 @@ impl Wine {
     }
 
     fn run_game_internal(&self, settings: &GlobalSettings, game: &InstalledGame) -> Result<std::process::Child> {
-        let components_path = settings.components_directory.join("wine");
-        let wine_path = components_path.join(&self.version);
-        let wine_bin = wine_path.join("bin/wine");
+        // Resolve version (use first installed version if empty)
+        let resolved_version = self.resolve_version(settings)?;
+        
+        println!("Using Wine version: {} (configured: {})", 
+            resolved_version,
+            if self.version.is_empty() { "auto" } else { &self.version }
+        );
+        
+        // Handle "system" wine version - use wine from PATH instead of components directory
+        let wine_bin = if resolved_version == "system" {
+            std::path::PathBuf::from("wine")
+        } else {
+            let components_path = settings.components_directory.join("wine");
+            let wine_path = components_path.join(&resolved_version);
+            wine_path.join("bin/wine")
+        };
 
         let prefix = settings
             .wineprefixes_directory

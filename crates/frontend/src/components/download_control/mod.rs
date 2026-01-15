@@ -7,6 +7,7 @@ pub use types::*;
 use crate::theme;
 use freya::prelude::*;
 use std::rc::Rc;
+use std::path::PathBuf;
 
 type GameProgressGetter = Rc<dyn Fn(&str) -> Option<types::DownloadProgress>>;
 type RuntimeProgressGetter = Rc<dyn Fn(&str) -> Option<types::SetupProgress>>;
@@ -16,6 +17,7 @@ type TweaksProgressGetter = Rc<dyn Fn(&str) -> Option<types::SetupProgress>>;
 pub struct DownloadControlProps {
     pub game_id: String,
     pub game_name: String,
+    pub game_biz: String,
     pub game_progress_key: String,
     pub get_game_progress: GameProgressGetter,
     pub get_runtime_progress: RuntimeProgressGetter,
@@ -28,6 +30,10 @@ pub struct DownloadControlProps {
     pub on_setup_tweaks: Option<EventHandler<PressEvent>>,
     #[props(default)]
     pub on_download_game: Option<EventHandler<PressEvent>>,
+    #[props(default)]
+    pub on_show_install_modal: Option<EventHandler<()>>,
+    #[props(default)]
+    pub on_show_import_modal: Option<EventHandler<()>>,
     pub game_state: crate::pages::game::state::GlobalGameStateSignal,
     pub game_needs_tweaks: bool,
 }
@@ -36,6 +42,7 @@ impl PartialEq for DownloadControlProps {
     fn eq(&self, other: &Self) -> bool {
         self.game_id == other.game_id
             && self.game_name == other.game_name
+            && self.game_biz == other.game_biz
             && self.game_progress_key == other.game_progress_key
             && self.accent_color == other.accent_color
             && self.game_needs_tweaks == other.game_needs_tweaks
@@ -47,6 +54,7 @@ impl Clone for DownloadControlProps {
         Self {
             game_id: self.game_id.clone(),
             game_name: self.game_name.clone(),
+            game_biz: self.game_biz.clone(),
             game_progress_key: self.game_progress_key.clone(),
             get_game_progress: self.get_game_progress.clone(),
             get_runtime_progress: self.get_runtime_progress.clone(),
@@ -55,6 +63,8 @@ impl Clone for DownloadControlProps {
             on_setup_runtime: self.on_setup_runtime,
             on_setup_tweaks: self.on_setup_tweaks,
             on_download_game: self.on_download_game,
+            on_show_install_modal: self.on_show_install_modal,
+            on_show_import_modal: self.on_show_import_modal,
             game_state: self.game_state,
             game_needs_tweaks: self.game_needs_tweaks,
         }
@@ -66,6 +76,7 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
     let DownloadControlProps {
         game_id,
         game_name,
+        game_biz,
         game_progress_key,
         get_game_progress,
         get_runtime_progress,
@@ -74,6 +85,8 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
         on_setup_runtime,
         on_setup_tweaks,
         on_download_game,
+        on_show_install_modal,
+        on_show_import_modal,
         game_state,
         game_needs_tweaks,
     } = props;
@@ -206,6 +219,11 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
                 on_setup_runtime,
                 on_setup_tweaks,
                 on_download_game,
+                on_show_install_modal,
+                on_show_import_modal,
+                game_name: game_name.clone(),
+                game_biz: game_biz.clone(),
+                accent_color,
             }
         }
     }
@@ -224,6 +242,11 @@ fn ActionButton(
     on_setup_runtime: Option<EventHandler<PressEvent>>,
     on_setup_tweaks: Option<EventHandler<PressEvent>>,
     on_download_game: Option<EventHandler<PressEvent>>,
+    on_show_install_modal: Option<EventHandler<()>>,
+    on_show_import_modal: Option<EventHandler<()>>,
+    game_name: String,
+    game_biz: String,
+    accent_color: String,
 ) -> Element {
     let game_state = use_context::<crate::pages::game::state::GlobalGameStateSignal>();
     let game_running = game_state.read().is_game_running();
@@ -256,6 +279,7 @@ fn ActionButton(
         let is_running = state.read().is_game_running();
         
         eprintln!("[ActionButton Click] game_running: {is_running}");
+        eprintln!("[ActionButton Click] runtime_ready: {runtime_ready}, tweaks_ready: {tweaks_ready}, installed: {installed}, game_needs_tweaks: {game_needs_tweaks}");
         
         if is_running {
             // Kill game
@@ -265,33 +289,96 @@ fn ActionButton(
             }
         } else if !runtime_ready {
             // Setup runtime
+            eprintln!("[ActionButton] Calling setup runtime handler");
             if let Some(handler) = on_setup_runtime {
                 handler.call(evt);
+            } else {
+                eprintln!("[ActionButton] No runtime setup handler available");
             }
         } else if game_needs_tweaks && !tweaks_ready {
             // Setup tweaks
+            eprintln!("[ActionButton] Calling setup tweaks handler");
             if let Some(handler) = on_setup_tweaks {
                 handler.call(evt);
+            } else {
+                eprintln!("[ActionButton] No tweaks setup handler available");
+            }
+        } else if !installed {
+            // Show modal for installation directory selection
+            eprintln!("[ActionButton] Showing install modal");
+            if let Some(handler) = on_show_install_modal {
+                handler.call(());
             }
         } else {
             // Download or start game
+            eprintln!("[ActionButton] Calling download/start game handler");
             if let Some(handler) = on_download_game {
                 handler.call(evt);
+            } else {
+                eprintln!("[ActionButton] No installer implemented for this game");
             }
         }
     });
 
     rsx! {
-        crate::components::MyButton {
-            onpress: dynamic_handler,
-            rect {
-                direction: "horizontal",
-                cross_align: "center",
-                main_align: "center",
-                label {
-                    font_size: "16",
-                    font_weight: "500",
-                    "{label}"
+        rect {
+            width: "100%",
+            direction: "vertical",
+            spacing: "8",
+            
+            crate::components::MyButton {
+                onpress: dynamic_handler,
+                rect {
+                    direction: "horizontal",
+                    cross_align: "center",
+                    main_align: "center",
+                    padding: "4 8",
+                    label {
+                        font_size: "18",
+                        font_weight: "600",
+                        "{label}"
+                    }
+                }
+            }
+
+            // Show import link when in "download game" state
+            if runtime_ready && (!game_needs_tweaks || tweaks_ready) && !installed {
+                rect {
+                    width: "100%",
+                    main_align: "center",
+                    padding: "2 2 2 0",  // top right bottom left - increased left padding
+                    
+                    rect {
+                        direction: "horizontal",
+                        spacing: "3",
+                        cross_align: "center",
+                        main_align: "center",
+                        padding: "8 25",
+                        corner_radius: "6",
+                        background: "rgb(35, 35, 40)",
+                        background_opacity: "0.6",
+                        border: "1 inner rgb(255, 255, 255, 0.15)",
+                        shadow: "0 2 8 0 rgb(0, 0, 0, 0.5)",
+                        backdrop_blur: "12",
+                        onclick: move |_| {
+                            if let Some(handler) = on_show_import_modal {
+                                handler.call(());
+                            }
+                        },
+                        
+                        label {
+                            font_size: "13",
+                            color: "white",
+                            "Already installed?"
+                        }
+                        
+                        label {
+                            font_size: "13",
+                            color: "{accent_color}",
+                            font_weight: "600",
+                            "Import here!"
+                        }
+                    }
                 }
             }
         }
@@ -481,4 +568,484 @@ fn ProgressBar(progress: types::DownloadProgress, accent: String, font: FontThem
             }
         }
     )
+}
+
+#[component]
+pub fn InstallDirectoryModal(
+    on_close: EventHandler<()>,
+    on_confirm: EventHandler<Option<PathBuf>>,
+    settings: Signal<std::sync::Arc<std::sync::RwLock<backend::settings::GlobalSettings>>>,
+    game_name: String,
+    game_biz: String,
+) -> Element {
+    let default_path = {
+        let settings_guard = settings.read();
+        if let Ok(s) = settings_guard.read() {
+            s.games_directory.join(&game_name).display().to_string()
+        } else {
+            format!("~/.local/share/elysia/games/{game_name}")
+        }
+    };
+
+    let current_path = use_signal(|| default_path.clone());
+    let mut error_message = use_signal(|| Option::<String>::None);
+
+    let on_browse = move |_| {
+        let mut path_clone = current_path;
+        spawn(async move {
+            let current_dir = path_clone.read().clone();
+            if let Some(folder) = rfd::AsyncFileDialog::new()
+                .set_title("Select Game Installation Directory")
+                .set_directory(&current_dir)
+                .pick_folder()
+                .await
+            {
+                path_clone.set(folder.path().display().to_string());
+            }
+        });
+    };
+    
+    let on_confirm_click = move |_| {
+        // Check if an installer exists for this game
+        let settings_guard = settings.read();
+        if let Ok(s) = settings_guard.read() {
+            let installer = backend::game_providers::installer::InstallerManager::create_installer(
+                &game_name,
+                &game_biz,
+                s.temp_directory.clone(),
+                s.games_directory.clone(),
+            );
+            
+            if installer.is_none() {
+                // No installer implemented
+                error_message.set(Some(format!("No installer implemented for {game_name}")));
+                eprintln!("[InstallDirectoryModal] No installer implemented for game: {game_name} (biz: {game_biz})");
+                return;
+            }
+        }
+        
+        // Installer exists, proceed with confirmation
+        let path_str = current_path.read().clone();
+        let custom_path = if path_str == default_path {
+            None
+        } else {
+            Some(PathBuf::from(path_str))
+        };
+        on_confirm.call(custom_path);
+    };
+
+    rsx! {
+        rect {
+            position: "absolute",
+            position_top: "0",
+            position_left: "0",
+            width: "100%",
+            height: "100%",
+            background: "rgb(0, 0, 0, 0.5)",
+            backdrop_blur: "8",
+            main_align: "center",
+            cross_align: "center",
+            onclick: move |_| on_close.call(()),
+
+            // Modal content
+            rect {
+                width: "500",
+                background: "rgb(40, 40, 48, 0.95)",
+                backdrop_blur: "20",
+                corner_radius: "16",
+                border: "1 solid rgb(100, 100, 110, 0.3)",
+                padding: "32",
+                direction: "vertical",
+                spacing: "24",
+                shadow: "0 8 32 0 rgb(0, 0, 0, 0.5)",
+                onclick: move |e| {
+                    e.stop_propagation();
+                },
+
+                // Header
+                rect {
+                    width: "fill",
+                    direction: "vertical",
+                    spacing: "8",
+
+                    label {
+                        font_size: "24",
+                        font_weight: "700",
+                        color: "white",
+                        "Select Installation Directory"
+                    }
+
+                    label {
+                        font_size: "14",
+                        color: "rgb(200, 200, 210)",
+                        "Choose where to install the game"
+                    }
+                }
+
+                rect {
+                    width: "fill",
+                    height: "1",
+                    background: "rgb(100, 100, 110, 0.3)",
+                }
+
+                // Directory selection
+                rect {
+                    width: "fill",
+                    direction: "vertical",
+                    spacing: "12",
+
+                    label {
+                        font_size: "13",
+                        font_weight: "600",
+                        color: "rgb(220, 220, 230)",
+                        "Installation Path:"
+                    }
+
+                    rect {
+                        width: "fill",
+                        padding: "12",
+                        background: "rgb(30, 30, 38)",
+                        corner_radius: "8",
+                        border: "1 solid rgb(100, 100, 110, 0.2)",
+
+                        label {
+                            font_size: "13",
+                            color: "rgb(200, 200, 210)",
+                            "{current_path.read()}"
+                        }
+                    }
+
+                    Button {
+                        theme: theme_with!(ButtonTheme {
+                            background: "rgb(60, 60, 75, 0.9)".into(),
+                            hover_background: "rgb(70, 70, 85, 1)".into(),
+                            border_fill: "rgb(100, 100, 120, 0.5)".into(),
+                            focus_border_fill: "rgb(110, 110, 130, 0.7)".into(),
+                            padding: "10 18".into(),
+                            corner_radius: "8".into(),
+                            shadow: "0 2 8 0 rgb(0, 0, 0, 0.3)".into(),
+                            font_theme: theme_with!(FontTheme {
+                                color: "white".into(),
+                            }),
+                        }),
+                        onpress: on_browse,
+                        label {
+                            font_size: "14",
+                            font_weight: "600",
+                            "Browse..."
+                        }
+                    }
+                }
+
+                // Error message if installer not found
+                if let Some(error) = error_message.read().as_ref() {
+                    rect {
+                        width: "fill",
+                        padding: "12",
+                        background: "rgb(80, 40, 40)",
+                        corner_radius: "8",
+                        border: "1 solid rgb(150, 60, 60)",
+
+                        label {
+                            font_size: "13",
+                            color: "rgb(255, 200, 200)",
+                            "{error}"
+                        }
+                    }
+                }
+
+                // Action buttons
+                rect {
+                    width: "fill",
+                    direction: "horizontal",
+                    spacing: "12",
+                    main_align: "end",
+
+                    Button {
+                        theme: theme_with!(ButtonTheme {
+                            background: "rgb(50, 50, 60, 0.9)".into(),
+                            hover_background: "rgb(60, 60, 70, 1)".into(),
+                            border_fill: "rgb(100, 100, 120, 0.5)".into(),
+                            focus_border_fill: "rgb(110, 110, 130, 0.7)".into(),
+                            padding: "10 24".into(),
+                            corner_radius: "8".into(),
+                            shadow: "0 2 8 0 rgb(0, 0, 0, 0.3)".into(),
+                            font_theme: theme_with!(FontTheme {
+                                color: "white".into(),
+                            }),
+                        }),
+                        onpress: move |_| on_close.call(()),
+                        label {
+                            font_size: "14",
+                            font_weight: "600",
+                            "Cancel"
+                        }
+                    }
+
+                    Button {
+                        theme: theme_with!(ButtonTheme {
+                            background: theme::ACCENT_PRIMARY.into(),
+                            hover_background: "rgb(80, 100, 180)".into(),
+                            border_fill: "rgb(100, 120, 200, 0.5)".into(),
+                            focus_border_fill: "rgb(110, 130, 210, 0.7)".into(),
+                            padding: "10 24".into(),
+                            corner_radius: "8".into(),
+                            shadow: "0 2 8 0 rgb(0, 0, 0, 0.3)".into(),
+                            font_theme: theme_with!(FontTheme {
+                                color: "white".into(),
+                            }),
+                        }),
+                        onpress: on_confirm_click,
+                        label {
+                            font_size: "14",
+                            font_weight: "600",
+                            "Confirm"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn ImportGameModal(
+    on_close: EventHandler<()>,
+    on_confirm: EventHandler<PathBuf>,
+    settings: Signal<std::sync::Arc<std::sync::RwLock<backend::settings::GlobalSettings>>>,
+    game_name: String,
+    game_biz: String,
+) -> Element {
+    let current_path = use_signal(|| Option::<String>::None);
+    let mut error_message = use_signal(|| Option::<String>::None);
+
+    let on_browse = move |_| {
+        let mut path_clone = current_path;
+        let mut error_clone = error_message;
+        spawn(async move {
+            if let Some(folder) = rfd::AsyncFileDialog::new()
+                .set_title("Select Existing Game Installation Directory")
+                .pick_folder()
+                .await
+            {
+                path_clone.set(Some(folder.path().display().to_string()));
+                // Clear error message when new path is selected
+                error_clone.set(None);
+            }
+        });
+    };
+    
+    let on_confirm_click = move |_| {
+        let path_opt = current_path.read().clone();
+        
+        if let Some(path_str) = path_opt {
+            // Verify game executable exists before confirming
+            let settings_guard = settings.read();
+            if let Ok(s) = settings_guard.read() {
+                let import_path = PathBuf::from(&path_str);
+                
+                // Check if installer exists for this game
+                let installer = backend::game_providers::installer::InstallerManager::create_installer(
+                    &game_name,
+                    &game_biz,
+                    s.temp_directory.clone(),
+                    s.games_directory.clone(),
+                );
+                
+                if let Some(installer) = installer {
+                    let executable_name = installer.get_executable_name();
+                    let executable_path = import_path.join(executable_name);
+                    
+                    if executable_path.exists() {
+                        // Executable found, proceed with import
+                        on_confirm.call(import_path);
+                    } else {
+                        // Executable not found
+                        error_message.set(Some(format!(
+                            "Game executable '{executable_name}' not found in the selected directory"
+                        )));
+                        eprintln!("[ImportGameModal] Executable not found: {}", executable_path.display());
+                    }
+                } else {
+                    error_message.set(Some(format!("No installer implemented for {game_name}")));
+                    eprintln!("[ImportGameModal] No installer implemented for game: {game_name} (biz: {game_biz})");
+                }
+            }
+        } else {
+            error_message.set(Some("Please select a directory".to_string()));
+        }
+    };
+
+    rsx! {
+        rect {
+            position: "absolute",
+            position_top: "0",
+            position_left: "0",
+            width: "100%",
+            height: "100%",
+            background: "rgb(0, 0, 0, 0.5)",
+            backdrop_blur: "8",
+            main_align: "center",
+            cross_align: "center",
+            onclick: move |_| on_close.call(()),
+
+            // Modal content
+            rect {
+                width: "500",
+                background: "rgb(40, 40, 48, 0.95)",
+                backdrop_blur: "20",
+                corner_radius: "16",
+                border: "1 solid rgb(100, 100, 110, 0.3)",
+                padding: "32",
+                direction: "vertical",
+                spacing: "24",
+                shadow: "0 8 32 0 rgb(0, 0, 0, 0.5)",
+                onclick: move |e| {
+                    e.stop_propagation();
+                },
+
+                // Header
+                rect {
+                    width: "fill",
+                    direction: "vertical",
+                    spacing: "8",
+
+                    label {
+                        font_size: "24",
+                        font_weight: "700",
+                        color: "white",
+                        "Import Existing Game"
+                    }
+
+                    label {
+                        font_size: "14",
+                        color: "rgb(200, 200, 210)",
+                        "Select the folder containing your existing game installation"
+                    }
+                }
+
+                rect {
+                    width: "fill",
+                    height: "1",
+                    background: "rgb(100, 100, 110, 0.3)",
+                }
+
+                // Directory selection
+                rect {
+                    width: "fill",
+                    direction: "vertical",
+                    spacing: "12",
+
+                    label {
+                        font_size: "13",
+                        font_weight: "600",
+                        color: "rgb(220, 220, 230)",
+                        "Game Directory:"
+                    }
+
+                    rect {
+                        width: "fill",
+                        padding: "12",
+                        background: "rgb(30, 30, 38)",
+                        corner_radius: "8",
+                        border: "1 solid rgb(100, 100, 110, 0.2)",
+
+                        label {
+                            font_size: "13",
+                            color: "rgb(200, 200, 210)",
+                            "{current_path.read().clone().unwrap_or_else(|| \"No directory selected\".to_string())}"
+                        }
+                    }
+
+                    Button {
+                        theme: theme_with!(ButtonTheme {
+                            background: "rgb(60, 60, 75, 0.9)".into(),
+                            hover_background: "rgb(70, 70, 85, 1)".into(),
+                            border_fill: "rgb(100, 100, 120, 0.5)".into(),
+                            focus_border_fill: "rgb(110, 110, 130, 0.7)".into(),
+                            padding: "10 18".into(),
+                            corner_radius: "8".into(),
+                            shadow: "0 2 8 0 rgb(0, 0, 0, 0.3)".into(),
+                            font_theme: theme_with!(FontTheme {
+                                color: "white".into(),
+                            }),
+                        }),
+                        onpress: on_browse,
+                        label {
+                            font_size: "14",
+                            font_weight: "600",
+                            "Browse..."
+                        }
+                    }
+                }
+
+                // Error message if any
+                if let Some(error) = error_message.read().as_ref() {
+                    rect {
+                        width: "fill",
+                        padding: "12",
+                        background: "rgb(80, 40, 40)",
+                        corner_radius: "8",
+                        border: "1 solid rgb(150, 60, 60)",
+
+                        label {
+                            font_size: "13",
+                            color: "rgb(255, 200, 200)",
+                            "{error}"
+                        }
+                    }
+                }
+
+                // Action buttons
+                rect {
+                    width: "fill",
+                    direction: "horizontal",
+                    spacing: "12",
+                    main_align: "end",
+
+                    Button {
+                        theme: theme_with!(ButtonTheme {
+                            background: "rgb(50, 50, 60, 0.9)".into(),
+                            hover_background: "rgb(60, 60, 70, 1)".into(),
+                            border_fill: "rgb(100, 100, 120, 0.5)".into(),
+                            focus_border_fill: "rgb(110, 110, 130, 0.7)".into(),
+                            padding: "10 24".into(),
+                            corner_radius: "8".into(),
+                            shadow: "0 2 8 0 rgb(0, 0, 0, 0.3)".into(),
+                            font_theme: theme_with!(FontTheme {
+                                color: "white".into(),
+                            }),
+                        }),
+                        onpress: move |_| on_close.call(()),
+                        label {
+                            font_size: "14",
+                            font_weight: "600",
+                            "Cancel"
+                        }
+                    }
+
+                    Button {
+                        theme: theme_with!(ButtonTheme {
+                            background: theme::ACCENT_PRIMARY.into(),
+                            hover_background: "rgb(80, 100, 180)".into(),
+                            border_fill: "rgb(100, 120, 200, 0.5)".into(),
+                            focus_border_fill: "rgb(110, 130, 210, 0.7)".into(),
+                            padding: "10 24".into(),
+                            corner_radius: "8".into(),
+                            shadow: "0 2 8 0 rgb(0, 0, 0, 0.3)".into(),
+                            font_theme: theme_with!(FontTheme {
+                                color: "white".into(),
+                            }),
+                        }),
+                        onpress: on_confirm_click,
+                        label {
+                            font_size: "14",
+                            font_weight: "600",
+                            "Import"
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

@@ -31,7 +31,7 @@ pub fn create_progress_getter(
             &game_id,
             &biz,
             settings_data.temp_directory.clone(),
-            &settings_data.components_directory,
+            settings_data.games_directory.clone(),
         )?;
         installer
             .get_progress(progress_key)
@@ -89,8 +89,17 @@ pub fn create_game_download_handler(
             // Extract runner info (both path and prefix) for Wine/Proton
             let (runner_path_opt, wine_prefix_opt) = match &installed_game.runner {
                 backend::runners::Runners::Wine(wine) => {
-                    let components_path = settings_guard.components_directory.join("wine");
-                    let wine_dir = components_path.join(&wine.version);
+                    // For system wine (version="system"), use /usr/bin as the base path
+                    // This is consistent with how system wine is detected in version_loader.rs
+                    // which checks for /usr/bin/wine existence
+                    // This allows the wine and wineserver binaries to be found via PATH lookup
+                    // For custom wine versions, use the components directory path
+                    let wine_dir = if wine.version == "system" {
+                        std::path::PathBuf::from("/usr/bin")
+                    } else {
+                        let components_path = settings_guard.components_directory.join("wine");
+                        components_path.join(&wine.version)
+                    };
                     let prefix = settings_guard.wineprefixes_directory.join(&installed_game.biz_name);
                     (
                         Some(wine_dir.to_string_lossy().to_string()),
@@ -188,7 +197,7 @@ pub fn create_game_download_handler(
                     &game_id_clone,
                     &biz_clone,
                     settings_guard.temp_directory.clone(),
-                    &settings_guard.components_directory,
+                    settings_guard.games_directory.clone(),
                 )
             };
 

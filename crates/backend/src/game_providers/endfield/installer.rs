@@ -52,6 +52,10 @@ impl GameInstaller for EndfieldInstaller {
         self.games_dir.join("endfield")
     }
 
+    fn get_executable_name(&self) -> &'static str {
+        "EndfieldTBeta2.exe"
+    }
+
     async fn install(&self) -> Result<InstalledGame, String> {
         println!("Starting Endfield installer for appcode={}", self.appcode);
         self.clear_progress();

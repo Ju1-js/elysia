@@ -30,6 +30,29 @@ impl Proton {
         kill_wineserver(&wineserver_path, &actual_prefix)
     }
 
+    /// Resolve the Proton version to use
+    /// If version is empty, returns the latest installed version (sorted alphabetically)
+    fn resolve_version(&self, settings: &GlobalSettings) -> Result<String> {
+        if !self.version.is_empty() {
+            return Ok(self.version.clone());
+        }
+
+        // Version is empty, find installed versions and pick the latest one
+        let base_dir = settings.components_directory.join("proton");
+        
+        let mut versions: Vec<String> = std::fs::read_dir(&base_dir)
+            .context("Failed to read proton directory")?
+            .filter_map(std::result::Result::ok)
+            .filter(|entry| entry.path().is_dir())
+            .filter_map(|entry| entry.file_name().to_str().map(String::from))
+            .collect();
+        
+        versions.sort();
+        
+        versions.into_iter().next_back()
+            .context("No Proton version installed. Please install Proton from settings.")
+    }
+
     /// Find the UMU runtime path
     fn find_umu_runtime(settings: &GlobalSettings) -> Result<std::path::PathBuf> {
         let umu_dir = settings.components_directory.join("umu");
@@ -129,8 +152,16 @@ impl Proton {
     }
 
     fn run_game_internal(&self, settings: &GlobalSettings, game: &InstalledGame) -> Result<std::process::Child> {
+        // Resolve version (use first installed version if empty)
+        let resolved_version = self.resolve_version(settings)?;
+        
+        println!("Using Proton version: {} (configured: {})", 
+            resolved_version,
+            if self.version.is_empty() { "auto" } else { &self.version }
+        );
+        
         let components_path = settings.components_directory.join("proton");
-        let proton_path = components_path.join(&self.version);
+        let proton_path = components_path.join(&resolved_version);
 
         let prefix = settings
             .wineprefixes_directory

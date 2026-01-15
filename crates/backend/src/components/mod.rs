@@ -129,19 +129,33 @@ impl ComponentManager {
     pub fn is_installed(&self, settings: &GlobalSettings, component_type: ComponentType) -> bool {
         let base_dir = settings.components_directory.join(component_type.name());
 
+        eprintln!("[ComponentManager::is_installed] Checking {component_type:?} at path: {}", base_dir.display());
+
         if !base_dir.exists() {
+            eprintln!("[ComponentManager::is_installed] Base directory does not exist");
             return false;
         }
 
         // Check for version subdirectories (Wine, DXVK, Proton, UMU, Jadeite)
-        std::fs::read_dir(&base_dir)
+        let result = std::fs::read_dir(&base_dir)
             .ok()
             .and_then(|entries| {
-                entries
+                let dirs: Vec<_> = entries
                     .filter_map(std::result::Result::ok)
-                    .find(|e| e.path().is_dir())
+                    .filter(|e| e.path().is_dir())
+                    .collect();
+                
+                eprintln!("[ComponentManager::is_installed] Found {} subdirectories:", dirs.len());
+                for dir in &dirs {
+                    eprintln!("  - {}", dir.file_name().to_string_lossy());
+                }
+                
+                dirs.into_iter().next()
             })
-            .is_some()
+            .is_some();
+        
+        eprintln!("[ComponentManager::is_installed] Result: {result}");
+        result
     }
 
     #[must_use] 

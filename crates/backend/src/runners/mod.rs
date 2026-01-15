@@ -158,13 +158,13 @@ impl Runners {
         version: Option<&str>,
         progress_tracker: Option<&ProgressTracker>,
         progress_key: &str,
-    ) -> Result<()> {
+    ) -> Result<String> {
         let _ = component_manager.refresh_component(ComponentType::Proton).await;
 
         let display_name = component_manager
             .get_latest_version(ComponentType::Proton).map_or_else(|| "Proton".to_string(), |v| v.display_name.clone());
 
-        component_manager
+        let dest_path = component_manager
             .download_component(
                 settings,
                 ComponentType::Proton,
@@ -190,7 +190,14 @@ impl Runners {
             pt.finish(progress_key);
         }
 
-        Ok(())
+        // Extract the version from the destination path
+        let downloaded_version = dest_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| anyhow::anyhow!("Failed to extract version from path"))?
+            .to_string();
+
+        Ok(downloaded_version)
     }
 
     /// # Errors
@@ -201,11 +208,11 @@ impl Runners {
         version: Option<&str>,
         progress_tracker: Option<&ProgressTracker>,
         progress_key: &str,
-    ) -> Result<()> {
+    ) -> Result<String> {
         let display_name = component_manager
             .get_latest_version(ComponentType::Wine).map_or_else(|| "Wine".to_string(), |v| v.display_name.clone());
 
-        component_manager
+        let dest_path = component_manager
             .download_component(
                 settings,
                 ComponentType::Wine,
@@ -231,7 +238,14 @@ impl Runners {
             pt.finish(progress_key);
         }
 
-        Ok(())
+        // Extract the version from the destination path
+        let downloaded_version = dest_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| anyhow::anyhow!("Failed to extract version from path"))?
+            .to_string();
+
+        Ok(downloaded_version)
     }
 
     /// # Errors
@@ -259,11 +273,11 @@ impl Runners {
         version: Option<&str>,
         progress_tracker: Option<&ProgressTracker>,
         progress_key: &str,
-    ) -> Result<()> {
+    ) -> Result<String> {
         let display_name = component_manager
             .get_latest_version(ComponentType::Dxvk).map_or_else(|| "DXVK".to_string(), |v| v.display_name.clone());
 
-        component_manager
+        let dest_path = component_manager
             .download_component(
                 settings,
                 ComponentType::Dxvk,
@@ -289,7 +303,14 @@ impl Runners {
             pt.finish(progress_key);
         }
 
-        Ok(())
+        // Extract the version from the destination path
+        let downloaded_version = dest_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| anyhow::anyhow!("Failed to extract version from path"))?
+            .to_string();
+
+        Ok(downloaded_version)
     }
 
 }

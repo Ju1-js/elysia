@@ -14,6 +14,7 @@ pub struct GlobalSettings {
     pub components_directory: PathBuf,
     pub temp_directory: PathBuf,
     pub cache_directory: PathBuf,
+    pub games_directory: PathBuf,
     pub installed_games: HashMap<String, InstalledGame>,
     pub game_preferences: HashMap<String, GamePreferences>,
     pub default_preferences: GamePreferences,
@@ -27,11 +28,13 @@ impl Default for GlobalSettings {
         let components_directory = data_path.join("components/");
         let temp_directory = data_path.join("temp/");
         let cache_directory = data_path.join("cache/");
+        let games_directory = data_path.join("games/");
         Self {
             wineprefixes_directory,
             components_directory,
             temp_directory,
             cache_directory,
+            games_directory,
             installed_games: HashMap::new(),
             game_preferences: HashMap::new(),
             default_preferences: GamePreferences::default(),
@@ -83,6 +86,8 @@ impl GlobalSettings {
                 ensure_or_default(&self.temp_directory, &DATA_PATH.join("temp"))?.to_path_buf();
             self.cache_directory =
                 ensure_or_default(&self.cache_directory, &DATA_PATH.join("cache"))?.to_path_buf();
+            self.games_directory =
+                ensure_or_default(&self.games_directory, &DATA_PATH.join("games"))?.to_path_buf();
             Ok(())
         };
         if let Err(e) = check_fn() {

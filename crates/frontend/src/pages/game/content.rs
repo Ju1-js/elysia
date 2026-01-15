@@ -1,5 +1,6 @@
 use freya::prelude::*;
 use reqwest::Url;
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use crate::{
@@ -104,6 +105,8 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
     let mut video_ready = use_signal(|| false);
     let mut video_loaded = use_signal(|| false);
     let mut show_settings = use_signal(|| false);
+    let mut show_install_modal = use_signal(|| false);
+    let mut show_import_modal = use_signal(|| false);
 
     let settings_scale_anim = use_animation(create_scale_animation());
 
@@ -422,6 +425,10 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
         0.92
     };
 
+    let game_id_for_import = game_data.id.clone();
+    let game_biz_for_import = game_data.biz.clone();
+    let _game_name_for_import = game_data.display.name.clone();
+
     rsx! {
         rect {
             key: "game-page-{game_id_str}",
@@ -453,7 +460,7 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
                 height: "100%",
                 layer: "-1",
 
-                if !*show_settings.read() {
+                if !*show_settings.read() && !*show_install_modal.read() && !*show_import_modal.read() {
                     TopRightButtons {}
 
                     BottomRightButtons {
@@ -464,7 +471,7 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
                     }
                 }
 
-                if !*show_settings.read() {
+                if !*show_settings.read() && !*show_install_modal.read() && !*show_import_modal.read() {
                     rect {
                         position: "absolute",
                         position_top: "0",
@@ -512,6 +519,7 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
                             DownloadControl {
                                 game_id: game_data.id.clone(),
                                 game_name: game_data.display.name.clone(),
+                                game_biz: game_data.biz.clone(),
                                 game_progress_key,
                                 get_game_progress: get_progress,
                                 get_runtime_progress,
@@ -520,6 +528,8 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
                                 on_setup_runtime: *on_setup_runtime.read(),
                                 on_setup_tweaks: *on_setup_tweaks.read(),
                                 on_download_game: *on_download_game.read(),
+                                on_show_install_modal: move |()| show_install_modal.set(true),
+                                on_show_import_modal: move |()| show_import_modal.set(true),
                                 game_state,
                                 game_needs_tweaks,
                             }
@@ -542,6 +552,101 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
                         on_close: move |()| show_settings.set(false),
                         game_name: game_data.display.name.clone(),
                         scale: settings_scale,
+                    }
+                }
+            }
+
+            if *show_install_modal.read() {
+                rect {
+                    key: "install-modal-overlay",
+                    position: "absolute",
+                    position_top: "0",
+                    position_left: "0",
+                    width: "100%",
+                    height: "100%",
+                    layer: "1",
+
+                    crate::components::download_control::InstallDirectoryModal {
+                        on_close: move |()| show_install_modal.set(false),
+                        on_confirm: move |path: Option<PathBuf>| {
+                            if let Some(custom_path) = path {
+                                // Update the games directory in settings
+                                if let Ok(mut settings_guard) = settings.peek().write() {
+                                    settings_guard.games_directory = custom_path;
+                                    let _ = settings_guard.save();
+                                }
+                            }
+                            // Close modal - user should click the button again to start download
+                            show_install_modal.set(false);
+                        },
+                        settings,
+                        game_name: game_data.display.name.clone(),
+                        game_biz: game_data.biz.clone(),
+                    }
+                }
+            }
+
+            if *show_import_modal.read() {
+                rect {
+                    key: "import-modal-overlay",
+                    position: "absolute",
+                    position_top: "0",
+                    position_left: "0",
+                    width: "100%",
+                    height: "100%",
+                    layer: "1",
+
+                    crate::components::download_control::ImportGameModal {
+                        on_close: move |()| show_import_modal.set(false),
+                        on_confirm: move |import_path: PathBuf| {
+                            let game_id = game_id_for_import.clone();
+                            let game_biz = game_biz_for_import.clone();
+                            
+                            // Clone for use in outer closure
+                            let game_id_outer = game_id.clone();
+                            let import_path_outer = import_path.clone();
+                            
+                            // Extract the Arc<RwLock<GlobalSettings>> from Signal before spawning
+                            let settings_arc = settings.peek().clone();
+                            
+                            let mut game_state_clone = game_state;
+                            let mut show_import_modal_clone = show_import_modal;
+                            
+                            spawn(async move {
+                                // Use import_game_by_scan
+                                let result = {
+                                    if let Ok(mut settings_guard) = settings_arc.write() {
+                                        let temp_dir = settings_guard.temp_directory.clone();
+                                        let games_dir = settings_guard.games_directory.clone();
+                                        
+                                        backend::game_providers::installer::InstallerManager::import_game_by_scan(
+                                            &mut settings_guard,
+                                            &game_id,
+                                            &game_biz,
+                                            import_path.clone(),
+                                            temp_dir,
+                                            games_dir,
+                                        )
+                                    } else {
+                                        Err("Failed to acquire settings lock".to_string())
+                                    }
+                                };
+                                
+                                match result {
+                                    Ok(_) => {
+                                        eprintln!("[GameContent] Successfully imported game from: {}", import_path_outer.display());
+                                        game_state_clone.write().set_download_installed(&game_id_outer, true);
+                                        show_import_modal_clone.set(false);
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[GameContent] Failed to import game: {e}");
+                                    }
+                                }
+                            });
+                        },
+                        settings,
+                        game_name: game_data.display.name.clone(),
+                        game_biz: game_data.biz.clone(),
                     }
                 }
             }
