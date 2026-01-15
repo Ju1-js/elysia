@@ -86,8 +86,8 @@ pub fn create_game_download_handler(
 
             eprintln!("[Game Launch] Launching game: {game_id}");
             
-            // Extract wine info (both path and prefix) if using Wine runner
-            let (wine_path_opt, wine_prefix_opt) = match &installed_game.runner {
+            // Extract runner info (both path and prefix) for Wine/Proton
+            let (runner_path_opt, wine_prefix_opt) = match &installed_game.runner {
                 backend::runners::Runners::Wine(wine) => {
                     let components_path = settings_guard.components_directory.join("wine");
                     let wine_dir = components_path.join(&wine.version);
@@ -97,7 +97,16 @@ pub fn create_game_download_handler(
                         Some(prefix.to_string_lossy().to_string())
                     )
                 }
-                _ => (None, None),
+                backend::runners::Runners::Proton(proton) => {
+                    let components_path = settings_guard.components_directory.join("proton");
+                    let proton_dir = components_path.join(&proton.version);
+                    let prefix = settings_guard.wineprefixes_directory.join(&installed_game.biz_name);
+                    (
+                        Some(proton_dir.to_string_lossy().to_string()),
+                        Some(prefix.to_string_lossy().to_string())
+                    )
+                }
+                backend::runners::Runners::Native => (None, None),
             };
             
             // Launch the game and get the process handle
@@ -110,7 +119,7 @@ pub fn create_game_download_handler(
                     eprintln!("[Game Launch] Game process started with PID: {pid}, waiting for completion...");
                     
                     // Set game running state with PID, wine_path, and wine_prefix
-                    game_state.write().set_game_running(true, Some(pid), wine_path_opt, wine_prefix_opt);
+                    game_state.write().set_game_running(true, Some(pid), runner_path_opt, wine_prefix_opt);
                     
                     // Pause the video player to save resources
                     eprintln!("[Game Launch] Pausing video player");
