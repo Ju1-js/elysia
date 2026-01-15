@@ -216,6 +216,12 @@ impl Wine {
             }
         }
 
+        // Apply game specific environmental variables
+        let tweak_env_vars = manifest.get_environment_vars(&game.id);
+        for (key, value) in &tweak_env_vars {
+            cmd.env(key, value);
+        }
+
         // Handle Wayland
         if game.enable_winewayland {
             cmd.env("DISPLAY", "");
