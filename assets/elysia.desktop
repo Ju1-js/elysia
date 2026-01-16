@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Elysia
+Comment=Universal anime game launcher
+Exec=elysia
+Icon=elysia
+Terminal=false
+Type=Application
+Categories=Game;Utility;
+Keywords=game;launcher;hoyo;genshin;honkai;endfield;
+StartupNotify=true
+StartupWMClass=elysia

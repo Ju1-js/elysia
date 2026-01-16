@@ -1,0 +1,58 @@
+app-id: wine.dawn.dawnwinery.elysia
+command: elysia
+rename-desktop-file: elysia.desktop
+
+runtime: org.gnome.Platform
+runtime-version: '49'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-nightly
+  - org.freedesktop.Sdk.Extension.llvm21
+
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=x11
+  - --socket=wayland
+  - --socket=pulseaudio
+  - --filesystem=/mnt 
+  - --filesystem=/media
+  - --filesystem=/run/media
+  - --device=all # Controllers
+  - --allow=devel # Required for Wine/Proton
+
+build-options:
+  append-path: /usr/lib/sdk/rust-nightly/bin:/usr/lib/sdk/llvm21/bin
+  prepend-ld-library-path: /usr/lib/sdk/llvm21/lib
+  env:
+    LIBCLANG_PATH: /usr/lib/sdk/llvm21/lib
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /share/doc
+  - /share/man
+  - /share/pkgconfig
+  - '*.la'
+  - '*.a'
+
+modules:
+  - name: elysia
+    buildsystem: simple
+    build-options:
+      env:
+        CARGO_HOME: ./cargo
+        SKIA_BINARIES_URL: file:///run/build/elysia/skia-binaries.tar.gz
+    build-commands:
+      - cargo --offline fetch --manifest-path Cargo.toml --verbose
+      - cargo --offline build --release --verbose
+      - install -Dm755 target/release/elysia /app/bin/elysia
+      - install -Dm644 assets/elysia.png /app/share/icons/hicolor/512x512/apps/wine.dawn.dawnwinery.elysia.png
+      - desktop-file-install --dir=/app/share/applications --set-key=Exec --set-value=elysia --set-key=Icon --set-value=wine.dawn.dawnwinery.elysia assets/elysia.desktop
+    sources:
+      - type: dir
+        path: ..
+      - cargo-sources.json
+      - type: file
+        url: https://github.com/rust-skia/skia-binaries/releases/download/0.87.0/skia-binaries-e551f334ad5cbdf43abf-x86_64-unknown-linux-gnu-egl-gl-pdf-svg-textlayout-wayland-x11.tar.gz
+        sha256: 9ba65bee64e5b7e7373a05fe4a07beba94e5f275df05085f142bb392f1668498
+        dest-filename: skia-binaries.tar.gz
