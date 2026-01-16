@@ -3,6 +3,7 @@ pub enum SettingsPage {
     LaunchOptions,
     Runner,
     Videos,
+    Utilities,
 }
 
 impl SettingsPage {
@@ -11,6 +12,7 @@ impl SettingsPage {
             SettingsPage::LaunchOptions => "Launch Options",
             SettingsPage::Runner => "Runner",
             SettingsPage::Videos => "Videos",
+            SettingsPage::Utilities => "Utilities",
         }
     }
 }

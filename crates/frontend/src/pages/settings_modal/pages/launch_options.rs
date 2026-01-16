@@ -60,7 +60,7 @@ pub fn LaunchOptionsPage(
 
                 ToggleOption {
                     label_text: "Enable Wine-Wayland".to_string(),
-                    description: None,
+                    description: "Enables Wine's native Wayland driver if supported",
                     enabled: enable_winewayland,
                     available: true,
                 }

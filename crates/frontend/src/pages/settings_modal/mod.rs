@@ -383,6 +383,15 @@ pub fn SettingsModal(
                             on_select: move |page| current_page.set(page),
                         }
 
+                        // Only show Utilities page in Game settings
+                        if matches!(context, SettingsContext::Game { .. }) {
+                            SidebarOption {
+                                page: SettingsPage::Utilities,
+                                current_page: current_page.read().clone(),
+                                on_select: move |page| current_page.set(page),
+                            }
+                        }
+
                         // Only show Videos page in General settings
                         if matches!(context, SettingsContext::General) {
                             SidebarOption {
@@ -548,6 +557,15 @@ pub fn SettingsModal(
                                 SettingsPage::Videos => rsx! {
                                     VideosPage {
                                         disable_videos: disable_videos,
+                                    }
+                                },
+                                SettingsPage::Utilities => rsx! {
+                                    UtilitiesPage {
+                                        settings_sig: settings_sig,
+                                        context: context.clone(),
+                                        selected_runner_type: selected_runner_type,
+                                        selected_proton: selected_proton,
+                                        selected_wine: selected_wine,
                                     }
                                 },
                             }
@@ -726,7 +744,7 @@ fn save_settings_to_disk_sync(
 
         match context {
             SettingsContext::General => {
-                // Update default preferences
+                // Update default preferences - preserve existing playtime
                 let existing_playtime = settings.default_preferences.playtime_seconds;
                 settings.default_preferences = backend::settings::GamePreferences {
                     runner: runner.clone(),
@@ -751,7 +769,8 @@ fn save_settings_to_disk_sync(
                     game.enable_gamemode = params.gamemode;
                 }
 
-                // Always save to game_preferences
+                // Always save to game_preferences (even for uninstalled games)
+                // Preserve existing playtime if it exists
                 let existing_playtime = settings.game_preferences
                     .get(&game_id)
                     .map_or(0, |prefs| prefs.playtime_seconds);

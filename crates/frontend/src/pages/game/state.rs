@@ -4,11 +4,24 @@ use backend::settings::InstalledGame;
 use freya::prelude::*;
 use std::collections::HashMap;
 
+/// State tracking for game download and update status.
+///
+/// This struct tracks the complete lifecycle of a game's installation and update state:
+/// - Initial download and installation
+/// - Update availability and version tracking
+/// - Active download/update progress
+
 #[derive(Clone, Debug, Default)]
 pub struct GameDownloadState {
     pub active: bool,
     pub progress: Option<DownloadProgress>,
     pub installed: bool,
+    #[allow(dead_code)]
+    pub update_available: bool,
+    #[allow(dead_code)]
+    pub current_version: Option<String>,
+    #[allow(dead_code)]
+    pub update_version: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -105,6 +118,46 @@ impl GlobalGameState {
             .entry(game_id.to_string())
             .or_default()
             .installed = installed;
+    }
+
+    /// Sets whether an update is available for the specified game.
+    ///
+    /// Called by the backend after checking the game provider's API for available updates.
+    /// The frontend uses this to display update prompts and UI elements.
+    #[allow(dead_code)]
+    pub fn set_game_update_available(&mut self, game_id: &str, update_available: bool) {
+        self.downloads
+            .entry(game_id.to_string())
+            .or_default()
+            .update_available = update_available;
+    }
+
+    /// Sets the current installed version and available update version for a game.
+    ///
+    /// Called by the backend to populate version information for display in the UI.
+    ///
+    /// # Arguments
+    /// * `game_id` - The game identifier
+    /// * `current_version` - The currently installed version (None if not installed)
+    /// * `update_version` - The available update version (None if no update available)
+    #[allow(dead_code)]
+    pub fn set_game_versions(&mut self, game_id: &str, current_version: Option<String>, update_version: Option<String>) {
+        let state = self.downloads
+            .entry(game_id.to_string())
+            .or_default();
+        state.current_version = current_version;
+        state.update_version = update_version;
+    }
+
+    /// Checks if the specified game has an update available.
+    ///
+    /// Used by the frontend to determine whether to show update UI elements.
+    /// Returns `true` if the backend has set an update as available.
+    #[allow(dead_code)]
+    pub fn needs_update(&self, game_id: &str) -> bool {
+        self.downloads
+            .get(game_id)
+            .is_some_and(|state| state.update_available)
     }
 
     // Component setup methods
