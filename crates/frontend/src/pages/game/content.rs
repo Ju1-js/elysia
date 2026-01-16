@@ -464,6 +464,7 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
                     TopRightButtons {}
 
                     BottomRightButtons {
+                        game_id: game_data.id.clone(),
                         on_settings: move |()| {
                             show_settings.set(true);
                             settings_scale_anim.start();

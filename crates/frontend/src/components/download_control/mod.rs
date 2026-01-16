@@ -221,6 +221,7 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
                 on_download_game,
                 on_show_install_modal,
                 on_show_import_modal,
+                game_id: game_id.clone(),
                 game_name: game_name.clone(),
                 game_biz: game_biz.clone(),
                 accent_color,
@@ -244,11 +245,13 @@ fn ActionButton(
     on_download_game: Option<EventHandler<PressEvent>>,
     on_show_install_modal: Option<EventHandler<()>>,
     on_show_import_modal: Option<EventHandler<()>>,
+    game_id: String,
     game_name: String,
     game_biz: String,
     accent_color: String,
 ) -> Element {
     let game_state = use_context::<crate::pages::game::state::GlobalGameStateSignal>();
+    let settings = use_context::<Signal<std::sync::Arc<std::sync::RwLock<backend::settings::GlobalSettings>>>>();
     let game_running = game_state.read().is_game_running();
     
     // Don't show button while any operation is in progress
@@ -282,6 +285,27 @@ fn ActionButton(
         eprintln!("[ActionButton Click] runtime_ready: {runtime_ready}, tweaks_ready: {tweaks_ready}, installed: {installed}, game_needs_tweaks: {game_needs_tweaks}");
         
         if is_running {
+            // Calculate and save playtime before killing game
+            let elapsed_seconds = state.read().get_elapsed_playtime();
+            eprintln!("[ActionButton] Game played for {elapsed_seconds} seconds, saving playtime...");
+            
+            // Save playtime to game_preferences
+            let settings_arc = settings.read().clone();
+            if let Ok(mut settings_guard) = settings_arc.write() {
+                // Get or create game preferences for this game
+                let prefs = settings_guard.game_preferences
+                    .entry(game_id.clone())
+                    .or_insert_with(backend::settings::GamePreferences::default);
+                
+                prefs.playtime_seconds += elapsed_seconds;
+                eprintln!("[ActionButton] Total playtime for {}: {} seconds", game_id, prefs.playtime_seconds);
+                
+                // Save settings to persist playtime
+                if let Err(e) = settings_guard.save() {
+                    eprintln!("[ActionButton] Failed to save playtime: {e}");
+                }
+            }
+            
             // Kill game
             match state.write().kill_game() {
                 Ok(()) => eprintln!("[ActionButton] Game process killed successfully"),

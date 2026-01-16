@@ -28,7 +28,52 @@ pub fn TopRightButtons() -> Element {
 }
 
 #[component]
-pub fn BottomRightButtons(on_settings: EventHandler<()>) -> Element {
+pub fn BottomRightButtons(on_settings: EventHandler<()>, game_id: String) -> Element {
+    let settings = use_context::<Signal<std::sync::Arc<std::sync::RwLock<backend::settings::GlobalSettings>>>>();
+    let game_state = use_context::<crate::pages::game::state::GlobalGameStateSignal>();
+    
+    let (is_installed, total_playtime_seconds) = {
+        let settings_guard = settings.read();
+        if let Ok(s) = settings_guard.read() {
+            let is_installed = s.installed_games.contains_key(&game_id);
+            // Get playtime from game_preferences, or 0 if not set
+            let playtime = s.game_preferences
+                .get(&game_id)
+                .map_or(0, |prefs| prefs.playtime_seconds);
+            (is_installed, playtime)
+        } else {
+            (false, 0)
+        }
+    };
+    
+    // Add current session playtime if game is running
+    let game_state_read = game_state.read();
+    let current_session_playtime = if game_state_read.is_game_running() {
+        game_state_read.get_elapsed_playtime()
+    } else {
+        0
+    };
+    
+    let total_seconds = total_playtime_seconds + current_session_playtime;
+    
+    // Format playtime as "Xh Ym"
+    let playtime_display = if total_seconds < 3600 {
+        let minutes = total_seconds / 60;
+        if minutes == 0 {
+            "0m".to_string()
+        } else {
+            format!("{minutes}m")
+        }
+    } else {
+        let hours = total_seconds / 3600;
+        let minutes = (total_seconds % 3600) / 60;
+        if minutes > 0 {
+            format!("{hours}h {minutes}m")
+        } else {
+            format!("{hours}h")
+        }
+    };
+    
     rsx! {
         rect {
             position: "absolute",
@@ -42,22 +87,25 @@ pub fn BottomRightButtons(on_settings: EventHandler<()>) -> Element {
             spacing: "12",
             padding: "32",
 
-            MyButton {
-                onpress: move |_| println!("Game tracker clicked!"),
-                rect {
-                    direction: "horizontal",
-                    cross_align: "center",
-                    spacing: "8",
-                    svg {
-                        width: "20",
-                        height: "20",
-                        svg_content: r#"<svg viewBox="0 0 24 24" fill="white"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.5-13H11v6l5.2 3.2.8-1.3-4.5-2.7V7z"/></svg>"#
-                    }
-                    label {
-                        font_size: "16",
-                        font_weight: "500",
-                        color: "white",
-                        "2h 34m"
+            // Only show playtime tracker if game is installed
+            if is_installed {
+                MyButton {
+                    onpress: move |_| println!("Game tracker clicked!"),
+                    rect {
+                        direction: "horizontal",
+                        cross_align: "center",
+                        spacing: "8",
+                        svg {
+                            width: "20",
+                            height: "20",
+                            svg_content: r#"<svg viewBox="0 0 24 24" fill="white"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.5-13H11v6l5.2 3.2.8-1.3-4.5-2.7V7z"/></svg>"#
+                        }
+                        label {
+                            font_size: "16",
+                            font_weight: "500",
+                            color: "white",
+                            "{playtime_display}"
+                        }
                     }
                 }
             }

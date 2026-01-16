@@ -727,6 +727,7 @@ fn save_settings_to_disk_sync(
         match context {
             SettingsContext::General => {
                 // Update default preferences
+                let existing_playtime = settings.default_preferences.playtime_seconds;
                 settings.default_preferences = backend::settings::GamePreferences {
                     runner: runner.clone(),
                     runtime_components,
@@ -734,6 +735,7 @@ fn save_settings_to_disk_sync(
                     enable_winewayland: params.winewayland,
                     enable_mangohud: params.mangohud,
                     enable_gamemode: params.gamemode,
+                    playtime_seconds: existing_playtime,
                 };
 
                 debug_info!("Saving default preferences - runner: {:?}", runner);
@@ -749,7 +751,11 @@ fn save_settings_to_disk_sync(
                     game.enable_gamemode = params.gamemode;
                 }
 
-                // Always save to game_preferences (even for uninstalled games)
+                // Always save to game_preferences
+                let existing_playtime = settings.game_preferences
+                    .get(&game_id)
+                    .map_or(0, |prefs| prefs.playtime_seconds);
+                
                 settings.game_preferences.insert(
                     game_id.clone(),
                     backend::settings::GamePreferences {
@@ -759,6 +765,7 @@ fn save_settings_to_disk_sync(
                         enable_winewayland: params.winewayland,
                         enable_mangohud: params.mangohud,
                         enable_gamemode: params.gamemode,
+                        playtime_seconds: existing_playtime,
                     },
                 );
 

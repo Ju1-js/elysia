@@ -152,6 +152,8 @@ pub struct GamePreferences {
     pub enable_winewayland: bool,
     pub enable_mangohud: bool,
     pub enable_gamemode: bool,
+    #[serde(default)]
+    pub playtime_seconds: u64,
 }
 
 impl Default for GamePreferences {
@@ -165,6 +167,7 @@ impl Default for GamePreferences {
             enable_winewayland: false,
             enable_mangohud: false,
             enable_gamemode: false,
+            playtime_seconds: 0,
         }
     }
 }

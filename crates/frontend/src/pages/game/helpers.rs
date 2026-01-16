@@ -127,6 +127,9 @@ pub fn create_game_download_handler(
                     let pid = child.id();
                     eprintln!("[Game Launch] Game process started with PID: {pid}, waiting for completion...");
                     
+                    // Drop settings_guard before spawning async task
+                    drop(settings_guard);
+                    
                     // Set game running state with PID, wine_path, and wine_prefix
                     game_state.write().set_game_running(true, Some(pid), runner_path_opt, wine_prefix_opt);
                     
@@ -155,8 +158,28 @@ pub fn create_game_download_handler(
                         }
                         
                         eprintln!("[Game Launch] Game closed, clearing running state and resuming video");
+                        // Calculate playtime
+                        let elapsed_seconds = game_state.read().get_elapsed_playtime();
+                        eprintln!("[Game Launch] Game played for {elapsed_seconds} seconds");
+                        
                         // Clear game running state after game closes
                         game_state.write().set_game_running(false, None, None, None);
+                        
+                        // Update playtime in game_preferences
+                        if let Ok(mut settings_guard) = settings_arc.write() {
+                            // Get or create game preferences for this game
+                            let prefs = settings_guard.game_preferences
+                                .entry(game_id_clone.clone())
+                                .or_insert_with(backend::settings::GamePreferences::default);
+                            
+                            prefs.playtime_seconds += elapsed_seconds;
+                            eprintln!("[Game Launch] Total playtime for {}: {} seconds", game_id_clone, prefs.playtime_seconds);
+                            
+                            // Save settings to persist playtime
+                            if let Err(e) = settings_guard.save() {
+                                eprintln!("[Game Launch] Failed to save playtime: {e}");
+                            }
+                        }
                         
                         // Resume the video player
                         video_state.write().resume();

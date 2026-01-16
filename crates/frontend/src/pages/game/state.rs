@@ -73,6 +73,7 @@ pub struct GlobalGameState {
     pub game_child_pid: Option<u32>,
     pub runner_path: Option<String>,    // Path to wine/proton directory
     pub wine_prefix: Option<String>,    // WINEPREFIX path
+    pub game_start_time: Option<std::time::Instant>,  // When the game started
 }
 
 impl GlobalGameState {
@@ -188,10 +189,26 @@ impl GlobalGameState {
         self.game_child_pid = pid;
         self.runner_path = runner_path;
         self.wine_prefix = wine_prefix;
+        
+        if running {
+            // Record start time when game starts
+            self.game_start_time = Some(std::time::Instant::now());
+        } else {
+            // Clear start time when game stops
+            self.game_start_time = None;
+        }
     }
 
     pub fn is_game_running(&self) -> bool {
         self.game_running
+    }
+
+    pub fn get_elapsed_playtime(&self) -> u64 {
+        if let Some(start_time) = self.game_start_time {
+            start_time.elapsed().as_secs()
+        } else {
+            0
+        }
     }
 
     #[allow(dead_code)]
