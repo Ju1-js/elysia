@@ -31,7 +31,7 @@ impl Proton {
     }
 
     /// Resolve the Proton version to use
-    /// If version is empty, returns the latest installed version (sorted alphabetically)
+    /// If version is empty, returns the latest installed version
     fn resolve_version(&self, settings: &GlobalSettings) -> Result<String> {
         if !self.version.is_empty() {
             return Ok(self.version.clone());

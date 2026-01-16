@@ -45,7 +45,7 @@ impl Wine {
     }
 
     /// Resolve the Wine version to use
-    /// If version is empty, returns the latest installed version (sorted alphabetically)
+    /// If version is empty, returns the latest installed version
     fn resolve_version(&self, settings: &GlobalSettings) -> Result<String> {
         if !self.version.is_empty() {
             return Ok(self.version.clone());
@@ -279,7 +279,9 @@ impl Wine {
 
         // Check if Jadeite is needed
         let manifest = TweakManifest::new();
-        if manifest.needs_jadeite(&game.id) {
+        let needs_jadeite = manifest.needs_jadeite(&game.id);
+        
+        if needs_jadeite {
             cmd.env("JADEITE_ALLOW_UNKNOWN", "1");
         }
 
@@ -315,12 +317,39 @@ impl Wine {
         );
         println!("Logging to: {}", log_path.display());
 
-        let child = cmd.spawn()
-            .with_context(|| format!("Failed to launch game: wine={}, exe={}", 
-                final_program, 
-                game.install_path.join(&game.executable_path).display()
-            ))?;
-
-        Ok(child)
+        // If using Jadeite, we need to monitor the Wine prefix instead of the launcher PID
+        if needs_jadeite {
+            cmd.spawn()
+                .with_context(|| format!("Failed to launch game: wine={}, exe={}", 
+                    final_program, 
+                    game.install_path.join(&game.executable_path).display()
+                ))?;
+            
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            
+            let wineserver = if resolved_version == "system" {
+                std::path::PathBuf::from("wineserver")
+            } else {
+                wine_bin.parent()
+                    .context("Failed to get wine bin parent directory")?
+                    .join("wineserver")
+            };
+            
+            let monitor = std::process::Command::new(wineserver)
+                .arg("-w")
+                .env("WINEPREFIX", &prefix)
+                .spawn()
+                .context("Failed to spawn wineserver monitor")?;
+            
+            Ok(monitor)
+        } else {
+            let child = cmd.spawn()
+                .with_context(|| format!("Failed to launch game: wine={}, exe={}", 
+                    final_program, 
+                    game.install_path.join(&game.executable_path).display()
+                ))?;
+            
+            Ok(child)
+        }
     }
 }
