@@ -11,6 +11,9 @@ jobs:
   build-flatpak:
     name: Build Flatpak Bundle
     runs-on: trixie
+    container:
+      image: node:20
+      options: --privileged
     steps:
       - name: Checkout
         uses: actions/checkout@v4
