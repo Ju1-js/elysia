@@ -1,0 +1,83 @@
+name: Build Flatpak
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-flatpak:
+    name: Build Flatpak Bundle
+    runs-on: trixie
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          submodules: recursive
+      - name: Install dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get remove -y needrestart || true
+          apt-get install -y git flatpak flatpak-builder python3 python3-pip wget sudo python3-aiohttp python3-tomlkit python3-yaml
+          flatpak remote-add --system --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --system -y flathub org.gnome.Platform//49 org.gnome.Sdk//49
+          flatpak install --system -y flathub org.freedesktop.Sdk.Extension.rust-nightly//25.08
+          flatpak install --system -y flathub org.freedesktop.Sdk.Extension.llvm21//25.08
+
+      - name: Generate cargo sources
+        working-directory: ./flatpak
+        run: |
+          python3 ./flatpak-builder-tools/cargo/flatpak-cargo-generator.py ../Cargo.lock -o cargo-sources.json
+
+      - name: Build Flatpak
+        working-directory: ./flatpak
+        run: |
+          flatpak-builder --repo=repo --force-clean build-dir wine.dawn.dawnwinery.elysia.yml
+
+      - name: Create bundle
+        working-directory: ./flatpak
+        run: |
+          flatpak build-bundle repo elysia.flatpak wine.dawn.dawnwinery.elysia
+          sha512sum elysia.flatpak > elysia.flatpak.sha512sum
+
+      - name: Upload artifact elysia.flatpak
+        uses: actions/upload-artifact@v3
+        with:
+          name: elysia.flatpak
+          path: ./flatpak/elysia.flatpak
+
+      - name: Upload artifact elysia.flatpak.sha512sum
+        uses: actions/upload-artifact@v3
+        with:
+          name: elysia.flatpak.sha512sum
+          path: ./flatpak/elysia.flatpak.sha512sum
+
+  release:
+    name: Release
+    needs: [build-flatpak]
+    runs-on: trixie
+    if: github.ref_type == 'tag'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: ./artifacts
+
+      - name: Merge artifacts
+        run: |
+          mkdir upload
+          mv ./artifacts/*/* ./upload
+
+      - name: Create release
+        uses: actions/forgejo-release@v2.7.3
+        with:
+          direction: upload
+          tag: ${{ github.ref_name }}
+          release-dir: ./upload
