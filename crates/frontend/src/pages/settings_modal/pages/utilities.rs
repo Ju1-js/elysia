@@ -13,6 +13,12 @@ pub fn UtilitiesPage(
     selected_runner_type: Signal<RunnerType>,
     selected_proton: Signal<String>,
     selected_wine: Signal<String>,
+    selected_dxvk: Signal<String>,
+    launch_wrapper: Signal<String>,
+    enable_winewayland: Signal<bool>,
+    enable_mangohud: Signal<bool>,
+    enable_gamemode: Signal<bool>,
+    disable_videos: Signal<bool>,
 ) -> Element {
     let mut command_output = use_signal(String::new);
     let mut is_running = use_signal(|| false);
@@ -73,12 +79,36 @@ pub fn UtilitiesPage(
                         }),
                         onpress: move |_| {
                             if !*is_running.read() {
+                                // Save settings before launching utility
                                 let settings = settings_sig.read().clone();
                                 let ctx = context_winecfg.clone();
                                 let runner_type = selected_runner_type.read().clone();
                                 let proton_ver = selected_proton.read().clone();
                                 let wine_ver = selected_wine.read().clone();
+                                let dxvk_ver = selected_dxvk.read().clone();
+                                let wrapper_val = launch_wrapper.read().clone();
+                                let winewayland = *enable_winewayland.read();
+                                let mangohud = *enable_mangohud.read();
+                                let gamemode = *enable_gamemode.read();
+                                let disable_videos_val = *disable_videos.read();
                                 let utility_cmd = "winecfg".to_string();
+
+                                // Save current settings to ensure the utility uses the latest configuration
+                                crate::pages::settings_modal::save_settings_to_disk_sync(
+                                    &settings,
+                                    ctx.clone(),
+                                    crate::pages::settings_modal::SaveSettingsParams {
+                                        runner_type: runner_type.clone(),
+                                        wine_ver: wine_ver.clone(),
+                                        proton_ver: proton_ver.clone(),
+                                        dxvk_ver,
+                                        wrapper_val,
+                                        winewayland,
+                                        mangohud,
+                                        gamemode,
+                                        disable_videos: disable_videos_val,
+                                    },
+                                );
 
                                 spawn(async move {
                                     is_running.set(true);
@@ -149,12 +179,36 @@ pub fn UtilitiesPage(
                         }),
                         onpress: move |_| {
                             if !*is_running.read() {
+                                // Save settings before launching utility
                                 let settings = settings_sig.read().clone();
                                 let ctx = context_regedit.clone();
                                 let runner_type = selected_runner_type.read().clone();
                                 let proton_ver = selected_proton.read().clone();
                                 let wine_ver = selected_wine.read().clone();
+                                let dxvk_ver = selected_dxvk.read().clone();
+                                let wrapper_val = launch_wrapper.read().clone();
+                                let winewayland = *enable_winewayland.read();
+                                let mangohud = *enable_mangohud.read();
+                                let gamemode = *enable_gamemode.read();
+                                let disable_videos_val = *disable_videos.read();
                                 let utility_cmd = "regedit".to_string();
+
+                                // Save current settings to ensure the utility uses the latest configuration
+                                crate::pages::settings_modal::save_settings_to_disk_sync(
+                                    &settings,
+                                    ctx.clone(),
+                                    crate::pages::settings_modal::SaveSettingsParams {
+                                        runner_type: runner_type.clone(),
+                                        wine_ver: wine_ver.clone(),
+                                        proton_ver: proton_ver.clone(),
+                                        dxvk_ver,
+                                        wrapper_val,
+                                        winewayland,
+                                        mangohud,
+                                        gamemode,
+                                        disable_videos: disable_videos_val,
+                                    },
+                                );
 
                                 spawn(async move {
                                     is_running.set(true);
@@ -338,9 +392,6 @@ fn execute_wine_utility(
         .ok_or_else(|| "Game not found in installed games".to_string())?;
 
     let wineprefix = settings.wineprefixes_directory.join(&game.biz_name);
-    let wineprefix_str = wineprefix
-        .to_str()
-        .ok_or_else(|| "Invalid wineprefix path".to_string())?;
 
     // Handle reset wineprefix specially
     if utility == "reset" {
@@ -351,98 +402,32 @@ fn execute_wine_utility(
         return Ok("Wineprefix has been reset. It will be recreated on next game launch.".to_string());
     }
 
-    // Execute winecfg or regedit
+    // Execute winecfg or regedit using backend runners
     match runner_type {
         RunnerType::Proton => {
-            execute_proton_utility(&settings, proton_ver, wineprefix_str, utility)
+            let proton = backend::runners::Proton {
+                version: proton_ver.to_string(),
+            };
+            match utility {
+                "winecfg" => proton.launch_winecfg(&settings, game),
+                "regedit" => proton.launch_regedit(&settings, game),
+                _ => return Err(format!("Unknown utility: {utility}")),
+            }
+            .map_err(|e| format!("Failed to launch {utility}: {e}"))?;
         }
         RunnerType::Wine => {
-            execute_wine_utility_direct(&settings, wine_ver, wineprefix_str, utility)
+            let wine = backend::runners::Wine {
+                version: wine_ver.to_string(),
+            };
+            match utility {
+                "winecfg" => wine.launch_winecfg(&settings, game),
+                "regedit" => wine.launch_regedit(&settings, game),
+                _ => return Err(format!("Unknown utility: {utility}")),
+            }
+            .map_err(|e| format!("Failed to launch {utility}: {e}"))?;
         }
     }
-}
-
-fn execute_proton_utility(
-    settings: &GlobalSettings,
-    proton_ver: &str,
-    wineprefix: &str,
-    utility: &str,
-) -> Result<String, String> {
-    let proton_path = settings.components_directory.join("proton").join(proton_ver);
-    
-    if !proton_path.exists() {
-        return Err(format!("Proton version {proton_ver} not found"));
-    }
-
-    // Find umu-run
-    let umu_dir = settings.components_directory.join("umu");
-    let umu_run = std::fs::read_dir(&umu_dir)
-        .map_err(|e| format!("Failed to read umu directory: {e}"))?
-        .filter_map(Result::ok)
-        .find(|entry| {
-            let path = entry.path();
-            path.is_dir() && path.join("umu-run").exists()
-        })
-        .map(|entry| entry.path().join("umu-run"))
-        .ok_or_else(|| "umu-run not found".to_string())?;
-
-    let proton_path_str = proton_path
-        .to_str()
-        .ok_or_else(|| "Invalid proton path".to_string())?;
-    let umu_run_str = umu_run
-        .to_str()
-        .ok_or_else(|| "Invalid umu-run path".to_string())?;
-
-    // Proton uses a /pfx subdirectory for the actual Wine prefix
-    let actual_prefix = format!("{wineprefix}/pfx");
-
-    // Execute: WINEPREFIX=prefix/pfx PROTONPATH=/path/to/proton umu-run utility
-    std::process::Command::new(umu_run_str)
-        .arg(utility)
-        .env("WINEPREFIX", actual_prefix)
-        .env("PROTONPATH", proton_path_str)
-        .spawn()
-        .map_err(|e| format!("Failed to spawn {utility}: {e}"))?;
 
     Ok(format!("{utility} launched successfully"))
 }
 
-fn execute_wine_utility_direct(
-    settings: &GlobalSettings,
-    wine_ver: &str,
-    wineprefix: &str,
-    utility: &str,
-) -> Result<String, String> {
-    let wine_path = if wine_ver == "system" {
-        // Use system wine
-        std::path::PathBuf::from("/usr/bin")
-    } else {
-        settings.components_directory.join("wine").join(wine_ver)
-    };
-
-    if !wine_path.exists() {
-        return Err(format!("Wine version {wine_ver} not found"));
-    }
-
-    let wine_bin = if wine_ver == "system" {
-        std::path::PathBuf::from("/usr/bin").join(utility)
-    } else {
-        wine_path.join("bin").join(utility)
-    };
-
-    if !wine_bin.exists() {
-        return Err(format!("{utility} not found in wine installation"));
-    }
-
-    let wine_bin_str = wine_bin
-        .to_str()
-        .ok_or_else(|| "Invalid wine binary path".to_string())?;
-
-    // Execute: WINEPREFIX=prefix /path/to/wine/utility
-    std::process::Command::new(wine_bin_str)
-        .env("WINEPREFIX", wineprefix)
-        .spawn()
-        .map_err(|e| format!("Failed to spawn {utility}: {e}"))?;
-
-    Ok(format!("{utility} launched successfully"))
-}

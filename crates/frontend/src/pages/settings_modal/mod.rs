@@ -566,6 +566,12 @@ pub fn SettingsModal(
                                         selected_runner_type: selected_runner_type,
                                         selected_proton: selected_proton,
                                         selected_wine: selected_wine,
+                                        selected_dxvk: selected_dxvk,
+                                        launch_wrapper: launch_wrapper,
+                                        enable_winewayland: enable_winewayland,
+                                        enable_mangohud: enable_mangohud,
+                                        enable_gamemode: enable_gamemode,
+                                        disable_videos: disable_videos,
                                     }
                                 },
                             }
@@ -695,20 +701,20 @@ fn load_game_values(
 }
 
 #[allow(clippy::struct_excessive_bools)]
-struct SaveSettingsParams {
-    runner_type: RunnerType,
-    wine_ver: String,
-    proton_ver: String,
-    dxvk_ver: String,
-    wrapper_val: String,
-    winewayland: bool,
-    mangohud: bool,
-    gamemode: bool,
-    disable_videos: bool,
+pub struct SaveSettingsParams {
+    pub runner_type: RunnerType,
+    pub wine_ver: String,
+    pub proton_ver: String,
+    pub dxvk_ver: String,
+    pub wrapper_val: String,
+    pub winewayland: bool,
+    pub mangohud: bool,
+    pub gamemode: bool,
+    pub disable_videos: bool,
 }
 
 /// Save settings to disk based on context
-fn save_settings_to_disk_sync(
+pub fn save_settings_to_disk_sync(
     settings_arc: &Arc<RwLock<GlobalSettings>>,
     context: SettingsContext,
     params: SaveSettingsParams,

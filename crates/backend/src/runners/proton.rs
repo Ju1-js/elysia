@@ -30,6 +30,81 @@ impl Proton {
         kill_wineserver(&wineserver_path, &actual_prefix)
     }
 
+    /// Launch winecfg utility with proper environment settings
+    /// # Errors
+    /// Returns an error if winecfg cannot be launched.
+    pub fn launch_winecfg(&self, settings: &GlobalSettings, game: &InstalledGame) -> Result<()> {
+        self.launch_utility(settings, game, "winecfg")
+    }
+
+    /// Launch regedit utility with proper environment settings
+    /// # Errors
+    /// Returns an error if regedit cannot be launched.
+    pub fn launch_regedit(&self, settings: &GlobalSettings, game: &InstalledGame) -> Result<()> {
+        self.launch_utility(settings, game, "regedit")
+    }
+
+    /// Launch a Wine utility with proper environment settings
+    /// # Errors
+    /// Returns an error if the utility cannot be launched.
+    fn launch_utility(&self, settings: &GlobalSettings, game: &InstalledGame, utility: &str) -> Result<()> {
+        // Resolve version
+        let resolved_version = self.resolve_version(settings)?;
+        
+        let proton_path = settings.components_directory.join("proton").join(&resolved_version);
+        
+        if !proton_path.exists() {
+            return Err(anyhow::anyhow!("Proton version {resolved_version} not found"));
+        }
+
+        // Find UMU runtime
+        let umu_run = Self::find_umu_runtime(settings)?;
+
+        let prefix_path = settings
+            .wineprefixes_directory
+            .join(&game.biz_name);
+
+        // Ensure the wineprefix directory exists before running utilities
+        std::fs::create_dir_all(&prefix_path)
+            .with_context(|| format!("Failed to create wineprefix directory: {}", prefix_path.display()))?;
+
+        let prefix = prefix_path
+            .to_string_lossy()
+            .into_owned();
+
+        // Proton uses a /pfx subdirectory for the actual Wine prefix
+        let actual_prefix = format!("{prefix}/pfx");
+
+        // Build the command
+        let mut cmd = Command::new(&umu_run);
+        cmd.arg(utility);
+
+        cmd.env("WINEPREFIX", &actual_prefix)
+            .env("WINEDEBUG", "")
+            .env("PROTONPATH", &proton_path);
+
+        // Apply user environment variables from game settings
+        for (key, value) in &game.environment {
+            cmd.env(key, value);
+        }
+
+        // Handle Wayland
+        if game.enable_winewayland {
+            cmd.env("PROTON_ENABLE_WAYLAND", "1");
+        }
+
+        println!(
+            "Launching {utility}: WINEPREFIX=\"{actual_prefix}\" PROTONPATH=\"{}\" {} {utility}",
+            proton_path.display(),
+            umu_run.display()
+        );
+
+        cmd.spawn()
+            .with_context(|| format!("Failed to spawn {utility}"))?;
+
+        Ok(())
+    }
+
     /// Resolve the Proton version to use
     /// If version is empty, returns the latest installed version
     fn resolve_version(&self, settings: &GlobalSettings) -> Result<String> {

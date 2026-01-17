@@ -44,6 +44,91 @@ impl Wine {
         }
     }
 
+    /// Launch winecfg utility with proper environment settings
+    /// # Errors
+    /// Returns an error if winecfg cannot be launched.
+    pub fn launch_winecfg(&self, settings: &GlobalSettings, game: &InstalledGame) -> Result<()> {
+        self.launch_utility(settings, game, "winecfg")
+    }
+
+    /// Launch regedit utility with proper environment settings
+    /// # Errors
+    /// Returns an error if regedit cannot be launched.
+    pub fn launch_regedit(&self, settings: &GlobalSettings, game: &InstalledGame) -> Result<()> {
+        self.launch_utility(settings, game, "regedit")
+    }
+
+    /// Launch a Wine utility with proper environment settings
+    /// # Errors
+    /// Returns an error if the utility cannot be launched.
+    fn launch_utility(&self, settings: &GlobalSettings, game: &InstalledGame, utility: &str) -> Result<()> {
+        // Resolve version
+        let resolved_version = self.resolve_version(settings)?;
+        
+        // Handle "system" wine version - use wine from PATH instead of components directory
+        let wine_bin = if resolved_version == "system" {
+            std::path::PathBuf::from(utility)
+        } else {
+            let wine_path = settings.components_directory.join("wine").join(&resolved_version);
+            if !wine_path.exists() {
+                return Err(anyhow::anyhow!("Wine version {resolved_version} not found"));
+            }
+            wine_path.join("bin").join(utility)
+        };
+
+        let prefix_path = settings
+            .wineprefixes_directory
+            .join(&game.biz_name);
+
+        // Ensure the wineprefix directory exists before running utilities
+        std::fs::create_dir_all(&prefix_path)
+            .with_context(|| format!("Failed to create wineprefix directory: {}", prefix_path.display()))?;
+
+        let prefix = prefix_path
+            .to_string_lossy()
+            .into_owned();
+
+        // Build the command
+        let mut cmd = Command::new(&wine_bin);
+
+        cmd.env("WINEPREFIX", &prefix)
+            .env("WINEDEBUG", "");
+
+        // Setup DXVK DLL overrides if needed
+        let mut dll_overrides = self.setup_dxvk(settings, game)?;
+        
+        // Merge with existing WINEDLLOVERRIDES
+        if let Some(existing) = game.environment.get("WINEDLLOVERRIDES") {
+            dll_overrides.push(existing.clone());
+        }
+
+        if !dll_overrides.is_empty() {
+            cmd.env("WINEDLLOVERRIDES", dll_overrides.join(";"));
+        }
+
+        // Apply user environment variables from game settings
+        for (key, value) in &game.environment {
+            if key != "WINEDLLOVERRIDES" {
+                cmd.env(key, value);
+            }
+        }
+
+        // Handle Wayland
+        if game.enable_winewayland {
+            cmd.env("DISPLAY", "");
+        }
+
+        println!(
+            "Launching {utility}: WINEPREFIX=\"{prefix}\" {} {utility}",
+            wine_bin.display()
+        );
+
+        cmd.spawn()
+            .with_context(|| format!("Failed to spawn {utility}"))?;
+
+        Ok(())
+    }
+
     /// Resolve the Wine version to use
     /// If version is empty, returns the latest installed version
     fn resolve_version(&self, settings: &GlobalSettings) -> Result<String> {

@@ -1,10 +1,10 @@
 #![allow(non_snake_case)]
 
-use crate::pages::{general_settings_modal::GeneralSettingsModal, Home};
+use crate::pages::general_settings_modal::GeneralSettingsModal;
 use freya::prelude::*;
 use freya_router::prelude::use_navigator;
 
-/// Settings page component - displays the general settings modal with Home as background
+/// Settings page component
 #[component]
 pub fn Settings() -> Element {
     let navigator = use_navigator();
@@ -13,8 +13,7 @@ pub fn Settings() -> Element {
         rect {
             width: "100%",
             height: "100%",
-            // Home page as background
-            Home {}
+            background: "linear-gradient(135deg, rgb(50,50,65) 0%, rgb(35,35,45) 100%)",
             
             // Settings modal overlay
             GeneralSettingsModal {
