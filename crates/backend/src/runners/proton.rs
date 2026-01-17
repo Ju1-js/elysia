@@ -72,14 +72,11 @@ impl Proton {
             .to_string_lossy()
             .into_owned();
 
-        // Proton uses a /pfx subdirectory for the actual Wine prefix
-        let actual_prefix = format!("{prefix}/pfx");
-
         // Build the command
         let mut cmd = Command::new(&umu_run);
         cmd.arg(utility);
 
-        cmd.env("WINEPREFIX", &actual_prefix)
+        cmd.env("WINEPREFIX", &prefix)
             .env("WINEDEBUG", "")
             .env("PROTONPATH", &proton_path);
 
@@ -94,7 +91,7 @@ impl Proton {
         }
 
         println!(
-            "Launching {utility}: WINEPREFIX=\"{actual_prefix}\" PROTONPATH=\"{}\" {} {utility}",
+            "Launching {utility}: WINEPREFIX=\"{prefix}\" PROTONPATH=\"{}\" {} {utility}",
             proton_path.display(),
             umu_run.display()
         );
