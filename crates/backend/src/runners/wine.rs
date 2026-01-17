@@ -131,7 +131,9 @@ impl Wine {
 
     /// Resolve the Wine version to use
     /// If version is empty, returns the latest installed version
-    fn resolve_version(&self, settings: &GlobalSettings) -> Result<String> {
+    /// # Errors
+    /// Returns an error if the wine directory cannot be read or if no Wine versions are installed.
+    pub fn resolve_version(&self, settings: &GlobalSettings) -> Result<String> {
         if !self.version.is_empty() {
             return Ok(self.version.clone());
         }

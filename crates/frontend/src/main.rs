@@ -42,6 +42,11 @@ fn main() {
     );
 }
 
+/// Check if Hoyo games should be shown based on the `ELYSIA_SHOW_HOYO` environment variable.
+fn should_show_hoyo_games() -> bool {
+    std::env::var("ELYSIA_SHOW_HOYO").ok().as_deref() == Some("1")
+}
+
 /// Main application component that initializes settings, context, and global state
 #[allow(clippy::too_many_lines)]
 fn app() -> Element {
@@ -62,22 +67,25 @@ fn app() -> Element {
     use_hook(|| {
         let settings = settings.write();
         if let Ok(mut settings_data) = settings.clone().write() {
-            // Use default preferences for runner and runtime components
-            let runner = settings_data.default_preferences.runner.clone();
-            let runtime_components = settings_data.default_preferences.runtime_components.clone();
-            
-            settings_data.installed_games.insert(
-                "U5hbdsT9W7".to_string(),
-                InstalledGame {
-                    id: "U5hbdsT9W7".to_string(),
-                    biz_name: "nap_global".to_string(),
-                    executable_path: PathBuf::from("ZenlessZoneZero.exe"),
-                    install_path: PathBuf::from("/mnt/SSD/Games/Zenless Zone Zero/"),
-                    runner,
-                    runtime_components,
-                    ..Default::default()
-                },
-            );
+            // Only add hardcoded test game if ELYSIA_SHOW_HOYO=1
+            if should_show_hoyo_games() {
+                // Use default preferences for runner and runtime components
+                let runner = settings_data.default_preferences.runner.clone();
+                let runtime_components = settings_data.default_preferences.runtime_components.clone();
+                
+                settings_data.installed_games.insert(
+                    "U5hbdsT9W7".to_string(),
+                    InstalledGame {
+                        id: "U5hbdsT9W7".to_string(),
+                        biz_name: "nap_global".to_string(),
+                        executable_path: PathBuf::from("ZenlessZoneZero.exe"),
+                        install_path: PathBuf::from("/mnt/SSD/Games/Zenless Zone Zero/"),
+                        runner,
+                        runtime_components,
+                        ..Default::default()
+                    },
+                );
+            }
         }
     });
 
@@ -99,15 +107,19 @@ fn app() -> Element {
 
     let context = use_resource(move || async move {
         let settings_lock = settings.read();
-        let settings_data = settings_lock.read().unwrap().clone();
+        let settings_data = settings_lock.read().expect("Settings lock poisoned").clone();
 
-        let mut api_games = get_games(&settings_data)
-            .await
-            .map_err(|err| err.clone())
-            .map_or_else(|err| {
-                debug_error!("Failed to load games from api: {err}");
-                Vec::new()
-            }, |response| response.games);
+        // Only load Hoyo games if ELYSIA_SHOW_HOYO=1
+        let mut api_games = if should_show_hoyo_games() {
+            get_games(&settings_data)
+                .await
+                .map_or_else(|err| {
+                    debug_error!("Failed to load games from api: {err}");
+                    Vec::new()
+                }, |response| response.games)
+        } else {
+            Vec::new()
+        };
 
         let endfield_games = backend::game_providers::endfield::get_games()
             .await
@@ -140,13 +152,16 @@ fn app() -> Element {
             }
         }
 
-        let api_game_basic_info =
+        let api_game_basic_info = if should_show_hoyo_games() {
             backend::game_providers::hoyoplay::get_all_game_basic_info(&settings_data, None)
                 .await
                 .map_or_else(|err| {
                     debug_error!("Failed to load game basic info: {err}");
                     Vec::new()
-                }, |info| info.game_info_list);
+                }, |info| info.game_info_list)
+        } else {
+            Vec::new()
+        };
 
         Context {
             api_games,

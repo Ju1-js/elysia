@@ -36,6 +36,8 @@ pub struct DownloadControlProps {
     pub on_show_import_modal: Option<EventHandler<()>>,
     pub game_state: crate::pages::game::state::GlobalGameStateSignal,
     pub game_needs_tweaks: bool,
+    #[props(default = false)]
+    pub tweaks_needs_update: bool,
 }
 
 impl PartialEq for DownloadControlProps {
@@ -46,6 +48,7 @@ impl PartialEq for DownloadControlProps {
             && self.game_progress_key == other.game_progress_key
             && self.accent_color == other.accent_color
             && self.game_needs_tweaks == other.game_needs_tweaks
+            && self.tweaks_needs_update == other.tweaks_needs_update
     }
 }
 
@@ -67,6 +70,7 @@ impl Clone for DownloadControlProps {
             on_show_import_modal: self.on_show_import_modal,
             game_state: self.game_state,
             game_needs_tweaks: self.game_needs_tweaks,
+            tweaks_needs_update: self.tweaks_needs_update,
         }
     }
 }
@@ -89,6 +93,7 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
         on_show_import_modal,
         game_state,
         game_needs_tweaks,
+        tweaks_needs_update,
     } = props;
 
     let ButtonTheme { font_theme, .. } = use_applied_theme!(&None, filled_button);
@@ -215,6 +220,7 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
                 tweaks_busy,
                 game_busy,
                 game_needs_tweaks,
+                tweaks_needs_update,
                 missing_components: game_state.read().get_missing_components(),
                 on_setup_runtime,
                 on_setup_tweaks,
@@ -239,6 +245,7 @@ fn ActionButton(
     tweaks_busy: bool,
     game_busy: bool,
     game_needs_tweaks: bool,
+    tweaks_needs_update: bool,
     missing_components: Vec<&'static str>,
     on_setup_runtime: Option<EventHandler<PressEvent>>,
     on_setup_tweaks: Option<EventHandler<PressEvent>>,
@@ -270,6 +277,8 @@ fn ActionButton(
         }
     } else if game_needs_tweaks && !tweaks_ready {
         "Download Tweaks".to_string()
+    } else if game_needs_tweaks && tweaks_needs_update {
+        "Update Tweaks".to_string()
     } else if !installed {
         "Download Game".to_string()
     } else {
@@ -320,8 +329,16 @@ fn ActionButton(
                 eprintln!("[ActionButton] No runtime setup handler available");
             }
         } else if game_needs_tweaks && !tweaks_ready {
-            // Setup tweaks
+            // Setup tweaks (download for first time)
             eprintln!("[ActionButton] Calling setup tweaks handler");
+            if let Some(handler) = on_setup_tweaks {
+                handler.call(evt);
+            } else {
+                eprintln!("[ActionButton] No tweaks setup handler available");
+            }
+        } else if game_needs_tweaks && tweaks_needs_update {
+            // Update tweaks (download new version)
+            eprintln!("[ActionButton] Calling update tweaks handler");
             if let Some(handler) = on_setup_tweaks {
                 handler.call(evt);
             } else {

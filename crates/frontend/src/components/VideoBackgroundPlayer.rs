@@ -283,7 +283,10 @@ async fn decode_and_stream_video(
 
                             let elapsed = last_frame_time.elapsed();
                             if elapsed < frame_duration {
-                                let sleep_duration = frame_duration.checked_sub(elapsed).unwrap();
+                                let Some(sleep_duration) = frame_duration.checked_sub(elapsed) else {
+                                    continue;
+                                };
+
                                 let sleep_start = Instant::now();
 
                                 while sleep_start.elapsed() < sleep_duration {

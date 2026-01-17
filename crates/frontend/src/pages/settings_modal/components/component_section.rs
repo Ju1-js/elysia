@@ -40,7 +40,7 @@ pub fn ComponentVersionSection(
         let selected = selected_version();
         let _ = is_installed;
         let settings = settings_signal.read();
-        let settings_data = settings.read().unwrap();
+        let settings_data = settings.read().expect("Settings lock poisoned");
         let components_dir = settings_data.components_directory.clone();
 
         spawn(async move {
@@ -179,7 +179,7 @@ fn ComponentDownloadButton(
 
                         let version = selected_version.read().clone();
                         let settings = settings_signal.read();
-                        let settings_data = settings.read().unwrap().clone();
+                        let settings_data = settings.read().expect("Settings lock poisoned").clone();
 
                         // Find the display name for the selected version
                         let version_display_name = available_versions.read()

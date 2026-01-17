@@ -414,6 +414,11 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
 
     // fixme: not only jadeite
     let game_needs_tweaks = tweak_manifest.read().needs_jadeite(&game_data.id);
+    
+    let tweaks_needs_update = system_status
+        .read()
+        .as_ref()
+        .is_some_and(backend::status::SystemStatus::tweaks_need_update);
 
     let settings_scale = if show_settings() {
         if settings_scale_anim.is_running() {
@@ -533,6 +538,7 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
                                 on_show_import_modal: move |()| show_import_modal.set(true),
                                 game_state,
                                 game_needs_tweaks,
+                                tweaks_needs_update,
                             }
                         }
                     }

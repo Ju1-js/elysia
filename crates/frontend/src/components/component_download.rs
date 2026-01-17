@@ -15,11 +15,9 @@ pub struct ComponentDownloadProgress {
 pub fn ComponentDownloadWidget(progress: Signal<Option<ComponentDownloadProgress>>) -> Element {
     let prog = progress.read();
 
-    if prog.is_none() {
+    let Some(p) = prog.as_ref() else {
         return rsx! { rect {} };
-    }
-
-    let p = prog.as_ref().unwrap();
+    };
 
     #[allow(clippy::cast_precision_loss)]
     let pct = if p.total > 0 {

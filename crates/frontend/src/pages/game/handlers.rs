@@ -389,7 +389,7 @@ pub fn create_tweaks_setup_handler(
 
         tracker.report(
             "tweaks_setup",
-            "Initializing Tweaks Setup",
+            "Tweaks Setup",
             backend::progress::ReportParams {
                 downloaded: 0,
                 total: 0,
@@ -404,19 +404,6 @@ pub fn create_tweaks_setup_handler(
                 state_signal.write().set_tweaks_active(&game_id_clone, false);
                 return;
             };
-
-            // Re-check if Jadeite (tweaks) is already installed before downloading
-            let jadeite_installed = service.is_installed(
-                &settings_data,
-                backend::components::ComponentType::Jadeite,
-            ).await;
-            state_signal.write().set_tweaks_ready(&game_id_clone, jadeite_installed);
-            
-            if jadeite_installed {
-                state_signal.write().set_tweaks_active(&game_id_clone, false);
-                tracker.clear("tweaks_setup");
-                return;
-            }
 
             let manager_arc = service.manager();
             
@@ -464,6 +451,16 @@ pub fn create_tweaks_setup_handler(
             match download_result {
                 Ok(_) => {
                     state_signal.write().set_tweaks_ready(&game_id_clone, true);
+
+                    // Cleanup old versions
+                    let cleanup_result = {
+                        let component_manager = manager_arc.read().await;
+                        component_manager.cleanup_old_versions(&settings_data, ComponentType::Jadeite)
+                    };
+                    
+                    if let Err(e) = cleanup_result {
+                        debug_error!("Failed to cleanup old Jadeite versions: {}", e);
+                    }
 
                     // Clone settings data before await to avoid holding lock
                     let settings_data = settings_arc.read().ok().map(|guard| guard.clone());

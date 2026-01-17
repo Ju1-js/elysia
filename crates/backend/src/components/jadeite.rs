@@ -1,27 +1,38 @@
 use crate::components::ComponentVersion;
 use anyhow::Result;
-use common::git;
+use common::HTTP_CLIENT;
 use reqwest::Url;
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct JadeiteMetadata {
+    jadeite: JadeiteInfo,
+}
+
+#[derive(Deserialize)]
+struct JadeiteInfo {
+    version: String,
+}
 
 pub async fn fetch_versions() -> Result<Vec<ComponentVersion>> {
-    let repo = "mkrsym1/jadeite";
-    let releases = git::codeberg_releases(repo).await?;
+    let metadata_url = "https://codeberg.org/mkrsym1/jadeite/raw/branch/master/metadata.json";
+    
+    let response = HTTP_CLIENT.get(metadata_url).send().await?;
+    let metadata: JadeiteMetadata = response.json().await?;
+    
+    let version = metadata.jadeite.version;
+    
+    // Construct the download URL based on the version
+    let version_tag = format!("v{version}");
+    let download_url = format!(
+        "https://codeberg.org/mkrsym1/jadeite/releases/download/{version_tag}/{version_tag}.zip"
+    );
+    
+    let component_version = ComponentVersion {
+        version: version.clone(),
+        download_url: Url::parse(&download_url)?,
+        display_name: version,
+    };
 
-    let versions = releases
-        .into_iter()
-        .filter_map(|rel| {
-            rel.assets
-                .iter()
-                .find(|asset| asset.name == format!("{}.zip", &rel.tag_name))
-                .and_then(|asset| {
-                    Some(ComponentVersion {
-                        version: rel.tag_name.clone(),
-                        download_url: Url::parse(&asset.browser_download_url).ok()?,
-                        display_name: rel.tag_name.clone(),
-                    })
-                })
-        })
-        .collect();
-
-    Ok(versions)
+    Ok(vec![component_version])
 }

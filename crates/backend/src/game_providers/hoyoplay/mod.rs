@@ -165,7 +165,9 @@ where
         .await
         .map_err(|e| format!("Api parse error: {e}"))?;
 
-    let _ = cacache::write_sync(cache_path, url, serde_json::to_vec(&response.data).unwrap());
+    if let Ok(data_vec) = serde_json::to_vec(&response.data) {
+        let _ = cacache::write_sync(cache_path, url, data_vec);
+    }
 
     Ok(response.data)
 }

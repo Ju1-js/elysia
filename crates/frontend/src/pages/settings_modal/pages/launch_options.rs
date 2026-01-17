@@ -10,7 +10,6 @@ pub fn LaunchOptionsPage(
     enable_mangohud: Signal<bool>,
     enable_gamemode: Signal<bool>,
 ) -> Element {
-    let mangohud_available = check_command_exists("mangohud");
     let gamemode_available = check_command_exists("gamemoderun");
 
     rsx! {
@@ -80,13 +79,9 @@ pub fn LaunchOptionsPage(
 
                 ToggleOption {
                     label_text: "Enable MangoHud".to_string(),
-                    description: Some(if mangohud_available {
-                        "Display performance overlay".to_string()
-                    } else {
-                        "MangoHud not found in PATH".to_string()
-                    }),
+                    description: Some("Display performance overlay".to_string()),
                     enabled: enable_mangohud,
-                    available: mangohud_available,
+                    available: true,
                 }
 
                 ToggleOption {

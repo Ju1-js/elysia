@@ -52,7 +52,7 @@ impl ProgressTracker {
             total_steps: params.total_steps,
         };
 
-        let mut map = self.progress.write().unwrap();
+        let mut map = self.progress.write().expect("Progress lock poisoned");
         map.insert(key.to_string(), progress);
     }
 
@@ -60,14 +60,14 @@ impl ProgressTracker {
     /// Panics if the lock is poisoned.
     #[must_use] 
     pub fn get(&self, key: &str) -> Option<ComponentProgress> {
-        let map = self.progress.read().unwrap();
+        let map = self.progress.read().expect("Progress lock poisoned");
         map.get(key).cloned()
     }
 
     /// # Panics
     /// Panics if the lock is poisoned.
     pub fn finish(&self, key: &str) {
-        let mut map = self.progress.write().unwrap();
+        let mut map = self.progress.write().expect("Progress lock poisoned");
         if let Some(progress) = map.get_mut(key) {
             progress.is_finished = true;
             progress.is_busy = false;
@@ -77,7 +77,7 @@ impl ProgressTracker {
     /// # Panics
     /// Panics if the lock is poisoned.
     pub fn clear(&self, key: &str) {
-        let mut map = self.progress.write().unwrap();
+        let mut map = self.progress.write().expect("Progress lock poisoned");
         map.remove(key);
     }
 }

@@ -73,14 +73,16 @@ pub fn MyNewsWidget(game_id: String) -> Element {
 
                     MyAnimatedCarousel {
                         key: "{game_id}",
-                        items: content.banners.iter().map(|banner| {
-                            rsx! {
-                                MyNetworkImage {
-                                    url: banner.image.url.parse::<Url>().unwrap(),
-                                    aspect_ratio: "min",
-                                    sampling: "catmull-rom"
+                        items: content.banners.iter().filter_map(|banner| {
+                            banner.image.url.parse::<Url>().ok().map(|url| {
+                                rsx! {
+                                    MyNetworkImage {
+                                        url,
+                                        aspect_ratio: "min",
+                                        sampling: "catmull-rom"
+                                    }
                                 }
-                            }
+                            })
                         }).collect(),
                         selected: carousel_index,
                         on_manual_change: move |()| {

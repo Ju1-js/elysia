@@ -89,16 +89,23 @@ pub fn create_game_download_handler(
             // Extract runner info (both path and prefix) for Wine/Proton
             let (runner_path_opt, wine_prefix_opt) = match &installed_game.runner {
                 backend::runners::Runners::Wine(wine) => {
+                    // Resolve the Wine version (handles "auto" and empty versions)
+                    let resolved_version = wine.resolve_version(&settings_guard)
+                        .unwrap_or_else(|e| {
+                            eprintln!("[Game Launch] Warning: Failed to resolve Wine version: {e}, using configured version: {}", wine.version);
+                            wine.version.clone()
+                        });
+                    
                     // For system wine (version="system"), use /usr/bin as the base path
                     // This is consistent with how system wine is detected in version_loader.rs
                     // which checks for /usr/bin/wine existence
                     // This allows the wine and wineserver binaries to be found via PATH lookup
                     // For custom wine versions, use the components directory path
-                    let wine_dir = if wine.version == "system" {
+                    let wine_dir = if resolved_version == "system" {
                         std::path::PathBuf::from("/usr/bin")
                     } else {
                         let components_path = settings_guard.components_directory.join("wine");
-                        components_path.join(&wine.version)
+                        components_path.join(&resolved_version)
                     };
                     let prefix = settings_guard.wineprefixes_directory.join(&installed_game.biz_name);
                     (
@@ -107,8 +114,15 @@ pub fn create_game_download_handler(
                     )
                 }
                 backend::runners::Runners::Proton(proton) => {
+                    // Resolve the Proton version (handles "auto" and empty versions)
+                    let resolved_version = proton.resolve_version(&settings_guard)
+                        .unwrap_or_else(|e| {
+                            eprintln!("[Game Launch] Warning: Failed to resolve Proton version: {e}, using configured version: {}", proton.version);
+                            proton.version.clone()
+                        });
+                    
                     let components_path = settings_guard.components_directory.join("proton");
-                    let proton_dir = components_path.join(&proton.version);
+                    let proton_dir = components_path.join(&resolved_version);
                     let prefix = settings_guard.wineprefixes_directory.join(&installed_game.biz_name);
                     (
                         Some(proton_dir.to_string_lossy().to_string()),
@@ -236,7 +250,7 @@ pub fn create_game_download_handler(
                                 eprintln!("Failed to save settings: {e}");
                             } else {
                                 drop(settings_guard);
-                                let new_settings = settings_arc.read().unwrap().clone();
+                                let new_settings = settings_arc.read().expect("Settings lock poisoned").clone();
                                 settings_mut.set(Arc::new(RwLock::new(new_settings)));
                             }
                         }

@@ -94,7 +94,7 @@ pub fn SettingsModal(
 
             let settings_data = {
                 let settings = settings_sig.read();
-                settings.read().unwrap().clone()
+                settings.read().expect("Settings lock poisoned").clone()
             };
 
             // Get currently selected versions to check if they're installed
@@ -156,7 +156,7 @@ pub fn SettingsModal(
     use_effect(use_reactive!(|selected_wine| {
         let selected = selected_wine();
         let settings = settings_sig.read();
-        let settings_data = settings.read().unwrap();
+        let settings_data = settings.read().expect("Settings lock poisoned");
         let components_dir = settings_data.components_directory.clone();
 
         spawn(async move {
@@ -176,7 +176,7 @@ pub fn SettingsModal(
     use_effect(use_reactive!(|selected_proton| {
         let selected = selected_proton();
         let settings = settings_sig.read();
-        let settings_data = settings.read().unwrap();
+        let settings_data = settings.read().expect("Settings lock poisoned");
         let components_dir = settings_data.components_directory.clone();
 
         spawn(async move {
@@ -194,7 +194,7 @@ pub fn SettingsModal(
     use_effect(use_reactive!(|selected_dxvk| {
         let selected = selected_dxvk();
         let settings = settings_sig.read();
-        let settings_data = settings.read().unwrap();
+        let settings_data = settings.read().expect("Settings lock poisoned");
         let components_dir = settings_data.components_directory.clone();
 
         spawn(async move {

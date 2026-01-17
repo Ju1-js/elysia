@@ -187,7 +187,11 @@ impl ComponentManager {
             None => return false,
         };
 
-        installed != *latest
+        // Normalize versions by stripping 'v' prefix for comparison
+        let installed_normalized = installed.strip_prefix('v').unwrap_or(&installed);
+        let latest_normalized = latest.strip_prefix('v').unwrap_or(latest);
+
+        installed_normalized != latest_normalized
     }
 
     /// # Errors
@@ -266,7 +270,10 @@ impl ComponentManager {
         
         if entries.len() == 1 && entries[0].path().is_dir() {
             let inner_dir = entries[0].path();
-            let temp_dir = dest_dir.parent().unwrap().join(format!("{}_temp", component_version.version));
+            let Some(parent) = dest_dir.parent() else {
+                return Err(anyhow::anyhow!("Destination directory has no parent"));
+            };
+            let temp_dir = parent.join(format!("{}_temp", component_version.version));
             
             // Move inner directory to temp location
             std::fs::rename(&inner_dir, &temp_dir)?;
