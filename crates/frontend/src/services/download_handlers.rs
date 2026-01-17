@@ -161,6 +161,7 @@ pub fn initiate_component_download(
     spawn(async move {
         let Some(service) = service_option else {
             debug_error!("ComponentService not initialized");
+            progress_tracker.clear("component_download");
             is_downloading_signal.set(false);
             progress_signal.set(None);
             on_complete(ComponentDownloadResult {
@@ -181,6 +182,8 @@ pub fn initiate_component_download(
         )
         .await;
 
+        // Clear the progress tracker to prevent stale data from being displayed
+        progress_tracker.clear("component_download");
         is_downloading_signal.set(false);
         progress_signal.set(None);
         on_complete(result);
