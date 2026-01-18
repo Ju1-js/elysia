@@ -57,8 +57,9 @@ impl Proton {
             return Err(anyhow::anyhow!("Proton version {resolved_version} not found"));
         }
 
-        // Find UMU runtime
+        // Find UMU runtime and Steam Runtime
         let umu_run = Self::find_umu_runtime(settings)?;
+        let steam_runtime = Self::find_steam_runtime(settings)?;
 
         let prefix_path = settings
             .wineprefixes_directory
@@ -78,6 +79,7 @@ impl Proton {
 
         cmd.env("WINEPREFIX", &prefix)
             .env("WINEDEBUG", "")
+            .env("RUNTIMEPATH", &steam_runtime)
             .env("PROTONPATH", &proton_path);
 
         // Apply user environment variables from game settings
@@ -91,7 +93,8 @@ impl Proton {
         }
 
         println!(
-            "Launching {utility}: WINEPREFIX=\"{prefix}\" PROTONPATH=\"{}\" {} {utility}",
+            "Launching {utility}: WINEPREFIX=\"{prefix}\" RUNTIMEPATH=\"{}\" PROTONPATH=\"{}\" {} {utility}",
+            steam_runtime.display(),
             proton_path.display(),
             umu_run.display()
         );
