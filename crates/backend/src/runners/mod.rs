@@ -81,7 +81,7 @@ impl Runners {
         matches!(self, Runners::Native)
     }
 
-    pub async fn get_wine_status(
+    pub fn get_wine_status(
         &self,
         settings: &GlobalSettings,
         component_manager: &mut ComponentManager,
@@ -90,21 +90,36 @@ impl Runners {
             return None;
         }
 
-        let _ = component_manager.refresh_component(ComponentType::Wine).await;
         let installed_version = component_manager.get_installed_version(settings, ComponentType::Wine);
         let installed = installed_version.is_some();
 
+        // Get 2 latest versions + installed version (avoiding duplicates)
         let available_versions: Vec<ComponentVersion> = component_manager
             .cache
             .entries
             .get(&ComponentType::Wine)
-            .map(|versions| versions.iter().take(3).cloned().collect())
+            .map(|versions| {
+                let mut result = Vec::new();
+                // Add the two latest versions
+                result.extend(versions.iter().take(2).cloned());
+                
+                // Add installed version if it's not already in the list
+                if let Some(ref installed_ver) = installed_version
+                    && !result.iter().any(|v| &v.version == installed_ver) {
+                    // Find the installed version in the full list
+                    if let Some(installed_component) = versions.iter().find(|v| &v.version == installed_ver) {
+                        result.push(installed_component.clone());
+                    }
+                }
+                
+                result
+            })
             .unwrap_or_default();
 
         Some((installed, installed_version, available_versions))
     }
 
-    pub async fn get_proton_status(
+    pub fn get_proton_status(
         &self,
         settings: &GlobalSettings,
         component_manager: &mut ComponentManager,
@@ -113,21 +128,45 @@ impl Runners {
             return None;
         }
 
-        let _ = component_manager.refresh_component(ComponentType::Proton).await;
         let installed_version = component_manager.get_installed_version(settings, ComponentType::Proton);
         let installed = installed_version.is_some();
 
+        // Get 2 latest versions from EACH source + installed version (avoiding duplicates)
         let available_versions: Vec<ComponentVersion> = component_manager
             .cache
             .entries
             .get(&ComponentType::Proton)
-            .map(|versions| versions.iter().take(3).cloned().collect())
+            .map(|versions| {
+                let mut result = Vec::new();
+                
+                // Group versions by source
+                let mut by_source: std::collections::HashMap<Option<String>, Vec<&ComponentVersion>> = std::collections::HashMap::new();
+                for version in versions {
+                    by_source.entry(version.source.clone()).or_default().push(version);
+                }
+                
+                // Take 2 from each source
+                for (_source, source_versions) in by_source {
+                    result.extend(source_versions.into_iter().take(2).cloned());
+                }
+                
+                // Add installed version if it's not already in the list
+                if let Some(ref installed_ver) = installed_version
+                    && !result.iter().any(|v| &v.version == installed_ver) {
+                    // Find the installed version in the full list
+                    if let Some(installed_component) = versions.iter().find(|v| &v.version == installed_ver) {
+                        result.push(installed_component.clone());
+                    }
+                }
+                
+                result
+            })
             .unwrap_or_default();
 
         Some((installed, installed_version, available_versions))
     }
 
-    pub async fn get_dxvk_status(
+    pub fn get_dxvk_status(
         &self,
         settings: &GlobalSettings,
         component_manager: &mut ComponentManager,
@@ -136,15 +175,30 @@ impl Runners {
             return None;
         }
 
-        let _ = component_manager.refresh_component(ComponentType::Dxvk).await;
         let installed_version = component_manager.get_installed_version(settings, ComponentType::Dxvk);
         let installed = installed_version.is_some();
 
+        // Get 2 latest versions + installed version (avoiding duplicates)
         let available_versions: Vec<ComponentVersion> = component_manager
             .cache
             .entries
             .get(&ComponentType::Dxvk)
-            .map(|versions| versions.iter().take(3).cloned().collect())
+            .map(|versions| {
+                let mut result = Vec::new();
+                // Add the two latest versions
+                result.extend(versions.iter().take(2).cloned());
+                
+                // Add installed version if it's not already in the list
+                if let Some(ref installed_ver) = installed_version
+                    && !result.iter().any(|v| &v.version == installed_ver) {
+                    // Find the installed version in the full list
+                    if let Some(installed_component) = versions.iter().find(|v| &v.version == installed_ver) {
+                        result.push(installed_component.clone());
+                    }
+                }
+                
+                result
+            })
             .unwrap_or_default();
 
         Some((installed, installed_version, available_versions))

@@ -32,6 +32,7 @@ pub async fn fetch_versions() -> Result<Vec<ComponentVersion>> {
         version: version.clone(),
         download_url: Url::parse(&download_url)?,
         display_name: version,
+        source: None,
     };
 
     Ok(vec![component_version])

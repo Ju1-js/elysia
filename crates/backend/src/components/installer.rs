@@ -144,6 +144,7 @@ pub async fn install_proton_runtime(
             download_url: Url::parse("https://github.com/Open-Wine-Components/umu-launcher/releases/download/1.3.0/umu-launcher-1.3.0-zipapp.tar")
                 .expect("Failed to parse hardcoded UMU URL"),
             display_name: "1.3.0".to_string(),
+            source: None,
         };
 
         component_manager

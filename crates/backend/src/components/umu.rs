@@ -19,6 +19,7 @@ pub async fn fetch_versions() -> Result<Vec<ComponentVersion>> {
                         version: rel.tag_name.clone(),
                         download_url: Url::parse(&asset.browser_download_url).ok()?,
                         display_name: rel.tag_name.clone(),
+                        source: None,
                     })
                 })
         })

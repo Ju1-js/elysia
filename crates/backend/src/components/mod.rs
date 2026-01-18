@@ -10,6 +10,7 @@ mod dxvk;
 pub mod installer;
 mod jadeite;
 mod proton;
+mod repository;
 pub mod steamrt;
 pub mod tweaks;
 mod umu;
@@ -52,14 +53,14 @@ impl ComponentType {
         }
     }
 
-    async fn fetch_versions(&self) -> Result<Vec<ComponentVersion>> {
+    async fn fetch_versions(&self, components_dir: &PathBuf) -> Result<Vec<ComponentVersion>> {
         match self {
-            ComponentType::Dxvk => dxvk::fetch_versions().await,
+            ComponentType::Dxvk => dxvk::fetch_versions(components_dir).await,
             ComponentType::Jadeite => jadeite::fetch_versions().await,
             ComponentType::Umu => umu::fetch_versions().await,
             ComponentType::SteamRuntime => Ok(vec![]),
-            ComponentType::Wine => wine::fetch_versions().await,
-            ComponentType::Proton => proton::fetch_versions().await,
+            ComponentType::Wine => wine::fetch_versions(components_dir).await,
+            ComponentType::Proton => proton::fetch_versions(components_dir).await,
         }
     }
 }
@@ -69,6 +70,8 @@ pub struct ComponentVersion {
     pub version: String,
     pub download_url: Url,
     pub display_name: String,
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 #[derive(Serialize, Default, Deserialize)]
@@ -78,19 +81,24 @@ pub struct VersionCache {
 
 pub struct ComponentManager {
     pub cache: VersionCache,
+    components_dir: PathBuf,
 }
 
 impl ComponentManager {
     #[allow(clippy::unused_async)]
     pub async fn new() -> Self {
+        let components_dir = crate::globals::DATA_PATH.join("components");
         Self {
             cache: VersionCache::default(),
+            components_dir,
         }
     }
 
     /// # Errors
     /// Returns an error if fetching versions fails.
     pub async fn refresh_index(&mut self) -> Result<()> {
+        eprintln!("[ComponentManager] Starting refresh_index");
+        
         let types = [
             ComponentType::Dxvk,
             ComponentType::Jadeite,
@@ -98,29 +106,36 @@ impl ComponentManager {
             ComponentType::Wine,
             ComponentType::Proton,
         ];
+        
+        let components_dir = self.components_dir.clone();
         let handles = types
             .iter()
-            .map(|&t| tokio::spawn(async move { (t, t.fetch_versions().await) }))
+            .map(|&t| {
+                let components_dir = components_dir.clone();
+                tokio::spawn(async move { (t, t.fetch_versions(&components_dir).await) })
+            })
             .collect::<Vec<_>>();
 
         for handle in handles {
             let (component_type, versions) = handle.await?;
             match versions {
                 Ok(versions) => {
+                    eprintln!("[ComponentManager] Fetched {} versions for {component_type:?}", versions.len());
                     self.cache.entries.insert(component_type, versions);
                 }
                 Err(err) => {
-                    eprintln!("Failed to fetch versions for {component_type:?}: {err}");
+                    eprintln!("[ComponentManager] Failed to fetch versions for {component_type:?}: {err}");
                 }
             }
         }
+        eprintln!("[ComponentManager] Finished refresh_index");
         Ok(())
     }
 
     /// # Errors
     /// Returns an error if fetching versions fails.
     pub async fn refresh_component(&mut self, component_type: ComponentType) -> Result<()> {
-        let versions = component_type.fetch_versions().await?;
+        let versions = component_type.fetch_versions(&self.components_dir).await?;
         self.cache.entries.insert(component_type, versions);
         Ok(())
     }
@@ -294,7 +309,7 @@ impl ComponentManager {
         }
 
         println!(
-            "✅ {} version {} installed to {}",
+            "{} version {} installed to {}",
             component_type.display_name(),
             component_version.version,
             dest_dir.display()

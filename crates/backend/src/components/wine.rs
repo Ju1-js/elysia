@@ -1,7 +1,8 @@
-use crate::components::ComponentVersion;
+use crate::components::{ComponentVersion, repository};
 use anyhow::Result;
 use reqwest::Url;
 use serde::Deserialize;
+use std::path::PathBuf;
 
 #[derive(Deserialize)]
 struct WineEntry {
@@ -10,22 +11,49 @@ struct WineEntry {
     uri: String,
 }
 
-#[allow(clippy::unused_async)]
-pub async fn fetch_versions() -> Result<Vec<ComponentVersion>> {
-    // Use include_str! to embed the JSON file at compile time
-    let content = include_str!("wine/spritz.json");
-    let entries: Vec<WineEntry> = serde_json::from_str(content)?;
+pub async fn fetch_versions(_components_dir: &PathBuf) -> Result<Vec<ComponentVersion>> {
+    // Fetch the components index
+    let index = repository::fetch_components_index().await?;
+    
+    if index.components.wine.is_empty() {
+        eprintln!("[Wine] No component configs found in index");
+        return Ok(Vec::new());
+    }
+    
+    let mut all_versions = Vec::new();
+    
+    // Fetch and parse each component JSON file listed in the index
+    for component_config in index.components.wine {
+        eprintln!("[Wine] Loading component: {} from {}", component_config.name, component_config.config);
+        
+        match repository::fetch_component_json(&component_config.config).await {
+            Ok(content) => {
+                match serde_json::from_str::<Vec<WineEntry>>(&content) {
+                    Ok(entries) => {
+                        let versions: Vec<ComponentVersion> = entries
+                            .into_iter()
+                            .filter_map(|entry| {
+                                Some(ComponentVersion {
+                                    version: entry.name.clone(),
+                                    download_url: Url::parse(&entry.uri).ok()?,
+                                    display_name: entry.title.clone(),
+                                    source: Some(component_config.id.clone()),
+                                })
+                            })
+                            .collect();
+                        eprintln!("[Wine] Loaded {} versions from {}", versions.len(), component_config.name);
+                        all_versions.extend(versions);
+                    }
+                    Err(err) => {
+                        eprintln!("[Wine] Failed to parse JSON from {}: {err}", component_config.config);
+                    }
+                }
+            }
+            Err(err) => {
+                eprintln!("[Wine] Failed to fetch {}: {err}", component_config.config);
+            }
+        }
+    }
 
-    let versions = entries
-        .into_iter()
-        .filter_map(|entry| {
-            Some(ComponentVersion {
-                version: entry.name.clone(), // Use name for folder structure
-                download_url: Url::parse(&entry.uri).ok()?,
-                display_name: entry.title.clone(),
-            })
-        })
-        .collect();
-
-    Ok(versions)
+    Ok(all_versions)
 }

@@ -14,8 +14,16 @@ pub struct ComponentService {
 
 impl ComponentService {
     /// Create a new `ComponentService` with an initialized `ComponentManager`
+    /// This also refreshes the component index to load available versions
     pub async fn new() -> Self {
-        let manager = ComponentManager::new().await;
+        let mut manager = ComponentManager::new().await;
+        
+        // Refresh the component index during initialization
+        // This fetches the latest component definitions from the remote repository
+        if let Err(err) = manager.refresh_index().await {
+            eprintln!("[ComponentService] Failed to refresh component index during initialization: {err}");
+        }
+        
         Self {
             manager: Arc::new(RwLock::new(manager)),
         }
@@ -83,7 +91,7 @@ impl ComponentService {
         runner: &Runners,
     ) -> Option<(bool, Option<String>, Vec<ComponentVersion>)> {
         let mut manager = self.manager.write().await;
-        runner.get_wine_status(settings, &mut manager).await
+        runner.get_wine_status(settings, &mut manager)
     }
 
     /// Get Proton status (installed, current version, available versions)
@@ -93,7 +101,7 @@ impl ComponentService {
         runner: &Runners,
     ) -> Option<(bool, Option<String>, Vec<ComponentVersion>)> {
         let mut manager = self.manager.write().await;
-        runner.get_proton_status(settings, &mut manager).await
+        runner.get_proton_status(settings, &mut manager)
     }
 
     /// Get DXVK status (installed, current version, available versions)
@@ -103,7 +111,7 @@ impl ComponentService {
         runner: &Runners,
     ) -> Option<(bool, Option<String>, Vec<ComponentVersion>)> {
         let mut manager = self.manager.write().await;
-        runner.get_dxvk_status(settings, &mut manager).await
+        runner.get_dxvk_status(settings, &mut manager)
     }
 }
 
