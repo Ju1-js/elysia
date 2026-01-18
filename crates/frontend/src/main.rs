@@ -16,6 +16,7 @@ use std::sync::RwLock;
 use std::{collections::HashMap, sync::Arc};
 
 use freya::prelude::*;
+use freya::prelude::reexports::winit::platform::x11::WindowAttributesExtX11;
 use reqwest::Url;
 
 use crate::context::Context;
@@ -37,7 +38,11 @@ fn main() {
                 .with_decorations(true)
                 .with_transparency(true)
                 .with_title("Elysia")
-                .with_window_attributes(|attributes| attributes.with_resizable(true)),
+                .with_window_attributes(|attributes| {
+                    attributes
+                        .with_resizable(true)
+                        .with_name("elysia", "elysia")
+                }),
         ),
     );
 }
