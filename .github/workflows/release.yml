@@ -1,0 +1,39 @@
+name: Release
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-native:
+    uses: ./.github/workflows/build-native.yml
+
+  build-flatpak:
+    uses: ./.github/workflows/build-flatpak.yml
+
+  release:
+    name: Create Release
+    needs: [build-native, build-flatpak]
+    runs-on: trixie
+    if: github.ref_type == 'tag'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: ./artifacts
+
+      - name: Merge artifacts
+        run: |
+          mkdir upload
+          mv ./artifacts/*/* ./upload
+
+      - name: Create release
+        uses: actions/forgejo-release@v2.7.3
+        with:
+          direction: upload
+          tag: ${{ github.ref_name }}
+          release-dir: ./upload

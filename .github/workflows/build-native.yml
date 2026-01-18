@@ -1,0 +1,46 @@
+name: Build Native Binary
+on:
+  workflow_call:
+  workflow_dispatch:
+    
+jobs:
+  build-native:
+    name: Build Native Binary
+    runs-on: trixie
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          submodules: recursive
+
+      - name: Build Elysia
+        run: |
+          : # Using https://hub.docker.com/r/nellokudo/wine-builder based on Steam Runtime for builds
+          docker run --rm \
+            -v "$(pwd):/workspace" \
+            -w /workspace \
+            nellokudo/wine-builder:latest \
+            bash -c '
+              set -e
+              unset CFLAGS CXXFLAGS LDFLAGS PKG_CONFIG
+              export CC=gcc-10
+              export CXX=g++-10
+              export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-linux-gnu-gcc-10
+              cargo build --bin elysia --release
+              cd target/release
+              sha512sum elysia > elysia.sha512sum
+            '
+
+      - name: Upload artifact elysia
+        uses: actions/upload-artifact@v3
+        with:
+          name: elysia
+          path: target/release/elysia
+
+      - name: Upload artifact elysia.sha512sum
+        uses: actions/upload-artifact@v3
+        with:
+          name: elysia.sha512sum
+          path: target/release/elysia.sha512sum
