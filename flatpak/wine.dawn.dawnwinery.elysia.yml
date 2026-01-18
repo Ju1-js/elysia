@@ -20,6 +20,8 @@ finish-args:
   - --filesystem=/run/media
   - --device=all # Controllers
   - --allow=devel # Required for Wine/Proton
+  - --allow=per-app-dev-shm # Required for pressure vessel
+  - --env=PATH=/app/bin:/app/utils/bin:/usr/bin:/usr/lib/extensions/vulkan/MangoHud/bin:/usr/lib/extensions/vulkan/gamescope/bin:/usr/lib/extensions/vulkan/OBSVkCapture/bin # mangohud, gamescope, obsvkcapture
 
 build-options:
   append-path: /usr/lib/sdk/rust-nightly/bin:/usr/lib/sdk/llvm21/bin

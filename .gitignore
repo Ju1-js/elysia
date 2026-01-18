@@ -1,1 +1,6 @@
 /target
+
+/flatpak/build-dir
+/flatpak/repo/
+/flatpak/.flatpak-builder
+/flatpak/cargo-sources.json
