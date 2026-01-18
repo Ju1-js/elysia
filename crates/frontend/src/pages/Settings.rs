@@ -13,7 +13,7 @@ pub fn Settings() -> Element {
         rect {
             width: "100%",
             height: "100%",
-            background: "linear-gradient(135deg, rgb(50,50,65) 0%, rgb(35,35,45) 100%)",
+            background: "rgb(72, 72, 85)",
             
             // Settings modal overlay
             GeneralSettingsModal {

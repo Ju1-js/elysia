@@ -34,7 +34,7 @@ pub fn LaunchOptionsPage(
                 label {
                     font_size: "13",
                     color: "{TEXT_SECONDARY}",
-                    "Add a command wrapper for launching (e.g., obs-gamecapture)"
+                    "Add a command wrapper for launching (e.g., obs-gamecapture %command%)"
                 }
 
                 Input {

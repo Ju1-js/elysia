@@ -367,17 +367,22 @@ fn ActionButton(
             direction: "vertical",
             spacing: "8",
             
-            crate::components::MyButton {
-                onpress: dynamic_handler,
-                rect {
-                    direction: "horizontal",
-                    cross_align: "center",
-                    main_align: "center",
-                    padding: "4 8",
-                    label {
-                        font_size: "18",
-                        font_weight: "600",
-                        "{label}"
+            rect {
+                width: "100%",
+                padding: "0 0 0 12",  // Add left padding to shift button right
+                
+                crate::components::MyButton {
+                    onpress: dynamic_handler,
+                    rect {
+                        direction: "horizontal",
+                        cross_align: "center",
+                        main_align: "center",
+                        padding: "4 8",
+                        label {
+                            font_size: "18",
+                            font_weight: "600",
+                            "{label}"
+                        }
                     }
                 }
             }
@@ -387,7 +392,6 @@ fn ActionButton(
                 rect {
                     width: "100%",
                     main_align: "center",
-                    padding: "2 2 2 0",  // top right bottom left - increased left padding
                     
                     rect {
                         direction: "horizontal",
@@ -417,7 +421,7 @@ fn ActionButton(
                             font_size: "13",
                             color: "{accent_color}",
                             font_weight: "600",
-                            "Import here!"
+                            " Import here!"
                         }
                     }
                 }

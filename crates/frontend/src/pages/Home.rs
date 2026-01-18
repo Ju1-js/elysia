@@ -44,8 +44,8 @@ pub fn Home() -> Element {
                 position_left: "0",
                 width: "100%",
                 height: "100%",
-                layer: "-1",
-                background: "linear-gradient(135deg, rgb(30,30,40) 0%, rgb(15,15,20) 100%)",
+                layer: "1",
+                background: "rgb(22, 22, 30)",
             }
 
             rect {
@@ -59,6 +59,7 @@ pub fn Home() -> Element {
                 shadow: "0 8 32 0 rgb(0, 0, 0, 60)",
                 backdrop_blur: "16",
                 max_width: "600",
+                layer: "1",
 
                 image {
                     width: "120",

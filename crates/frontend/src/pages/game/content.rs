@@ -98,6 +98,7 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
     let mut page_state = use_context::<Signal<GamePageState>>();
     let mut game_state = use_context::<GlobalGameStateSignal>();
     let video_state = use_context::<Signal<VideoState>>();
+    let show_elysia_modal = use_context::<Signal<bool>>();
     let tweak_manifest = use_signal(TweakManifest::new);
 
     let video_fade = use_animation(create_fade_animation());
@@ -465,7 +466,7 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
                 height: "100%",
                 layer: "-1",
 
-                if !*show_settings.read() && !*show_install_modal.read() && !*show_import_modal.read() {
+                if !*show_settings.read() && !*show_install_modal.read() && !*show_import_modal.read() && !*show_elysia_modal.read() {
                     TopRightButtons {}
 
                     BottomRightButtons {
@@ -477,7 +478,7 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
                     }
                 }
 
-                if !*show_settings.read() && !*show_install_modal.read() && !*show_import_modal.read() {
+                if !*show_settings.read() && !*show_install_modal.read() && !*show_import_modal.read() && !*show_elysia_modal.read() {
                     rect {
                         position: "absolute",
                         position_top: "0",

@@ -318,7 +318,7 @@ pub fn SettingsModal(
             position_left: "80",
             width: "calc(100% - 80)",
             height: "100%",
-            background: "rgb(0, 0, 0, 0.5)",
+            background: "rgb(0, 0, 0, 0.3)",
             backdrop_blur: "8",
             padding: "32",
             onclick: {
@@ -344,7 +344,8 @@ pub fn SettingsModal(
                 rect {
                     width: "280",
                     height: "fill",
-                    background: "rgb(40, 40, 48, 0.6)",
+                    background: "rgb(50, 50, 58)",
+                    background_opacity: "0.7",
                     backdrop_blur: "20",
                     corner_radius: "16",
                     border: "1 solid rgb(100, 100, 110, 0.2)",

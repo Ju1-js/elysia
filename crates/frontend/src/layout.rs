@@ -8,7 +8,7 @@ use reqwest::Url;
 use crate::{
     Context,
     components::{Expand, MyNetworkImage, MySidebarItem},
-    pages::{ErrorPage, Game, Home, Settings},
+    pages::{ErrorPage, Game, Home, Settings, ElysiaModal},
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -186,20 +186,44 @@ fn make_links(
         .collect::<Vec<_>>()
 }
 
-#[allow(non_snake_case)]
+// Helper function to create scale animation
+fn create_scale_animation() -> impl Fn(&mut AnimConfiguration) -> AnimNum {
+    move |_| {
+        AnimNum::new(0.92, 1.0)
+            .time(200)
+            .ease(Ease::Out)
+            .function(Function::Cubic)
+    }
+}
+
+#[allow(non_snake_case, clippy::too_many_lines)]
 fn AppLayout() -> Element {
     let ctx_resource = &use_context::<Resource<Context>>();
     let selected_game_id = use_signal(|| None::<String>);
     let game_page_state = use_signal(|| GamePageState { prev_game_id: None });
+    let mut show_elysia_modal = use_signal(|| false);
     let navigator = use_navigator();
+
+    let elysia_scale_anim = use_animation(create_scale_animation());
 
     use_context_provider(|| selected_game_id);
     use_context_provider(|| game_page_state);
+    use_context_provider(|| show_elysia_modal);
 
     let ctx_option = ctx_resource.read_unchecked().clone();
     if let Some(ref ctx) = ctx_option {
         use_context_provider(|| ctx.clone());
     }
+
+    let elysia_scale = if show_elysia_modal() {
+        if elysia_scale_anim.is_running() {
+            f64::from(elysia_scale_anim.get().read().read())
+        } else {
+            1.0
+        }
+    } else {
+        0.92
+    };
 
     rsx! {
         NativeRouter {
@@ -261,7 +285,8 @@ fn AppLayout() -> Element {
 
                             rect {
                                 onclick: move |_| {
-                                    println!("Elysia logo clicked");
+                                    show_elysia_modal.set(true);
+                                    elysia_scale_anim.start();
                                 },
                                 MySidebarItem {
                                     image {
@@ -283,6 +308,24 @@ fn AppLayout() -> Element {
 
                         Body {
                             AnimatedOutlet { }
+                        }
+                    }
+
+                    // Elysia modal overlay
+                    if *show_elysia_modal.read() {
+                        rect {
+                            position: "absolute",
+                            position_top: "0",
+                            position_left: "0",
+                            width: "100%",
+                            height: "100%",
+                            layer: "-3",
+                            ElysiaModal {
+                                on_close: move |()| {
+                                    show_elysia_modal.set(false);
+                                },
+                                scale: elysia_scale,
+                            }
                         }
                     }
                 }
