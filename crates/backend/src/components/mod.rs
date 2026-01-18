@@ -57,8 +57,8 @@ impl ComponentType {
         match self {
             ComponentType::Dxvk => dxvk::fetch_versions(components_dir).await,
             ComponentType::Jadeite => jadeite::fetch_versions().await,
-            ComponentType::Umu => umu::fetch_versions().await,
-            ComponentType::SteamRuntime => Ok(vec![]),
+            ComponentType::Umu => umu::fetch_versions(components_dir).await,
+            ComponentType::SteamRuntime => steamrt::fetch_versions(components_dir).await,
             ComponentType::Wine => wine::fetch_versions(components_dir).await,
             ComponentType::Proton => proton::fetch_versions(components_dir).await,
         }
@@ -103,6 +103,7 @@ impl ComponentManager {
             ComponentType::Dxvk,
             ComponentType::Jadeite,
             ComponentType::Umu,
+            ComponentType::SteamRuntime,
             ComponentType::Wine,
             ComponentType::Proton,
         ];
@@ -279,27 +280,30 @@ impl ComponentManager {
         .await??;
 
         // Fix double-nesting: if dest_dir only contains a single directory, flatten it
-        let entries: Vec<_> = std::fs::read_dir(&dest_dir)?
-            .filter_map(std::result::Result::ok)
-            .collect();
-        
-        if entries.len() == 1 && entries[0].path().is_dir() {
-            let inner_dir = entries[0].path();
-            let Some(parent) = dest_dir.parent() else {
-                return Err(anyhow::anyhow!("Destination directory has no parent"));
-            };
-            let temp_dir = parent.join(format!("{}_temp", component_version.version));
+        // Exception: Don't flatten SteamRuntime as it needs to keep SteamLinuxRuntime_sniper subdirectory
+        if component_type != ComponentType::SteamRuntime {
+            let entries: Vec<_> = std::fs::read_dir(&dest_dir)?
+                .filter_map(std::result::Result::ok)
+                .collect();
             
-            // Move inner directory to temp location
-            std::fs::rename(&inner_dir, &temp_dir)?;
-            
-            // Remove outer directory
-            std::fs::remove_dir(&dest_dir)?;
-            
-            // Rename temp to correct location
-            std::fs::rename(&temp_dir, &dest_dir)?;
-            
-            println!("   Flattened nested directory structure");
+            if entries.len() == 1 && entries[0].path().is_dir() {
+                let inner_dir = entries[0].path();
+                let Some(parent) = dest_dir.parent() else {
+                    return Err(anyhow::anyhow!("Destination directory has no parent"));
+                };
+                let temp_dir = parent.join(format!("{}_temp", component_version.version));
+                
+                // Move inner directory to temp location
+                std::fs::rename(&inner_dir, &temp_dir)?;
+                
+                // Remove outer directory
+                std::fs::remove_dir(&dest_dir)?;
+                
+                // Rename temp to correct location
+                std::fs::rename(&temp_dir, &dest_dir)?;
+                
+                println!("   Flattened nested directory structure");
+            }
         }
 
         std::fs::remove_file(&archive_path)?;
@@ -325,11 +329,6 @@ impl ComponentManager {
         settings: &GlobalSettings,
         component_type: ComponentType,
     ) -> Result<()> {
-        // Skip cleanup for UMU - it has special structure
-        if component_type == ComponentType::Umu {
-            return Ok(());
-        }
-
         let base_dir = settings.components_directory.join(component_type.name());
 
         if !base_dir.exists() {

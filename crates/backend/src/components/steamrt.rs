@@ -1,4 +1,6 @@
 use anyhow::{Context, Result};
+use reqwest::Url;
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Write;
@@ -6,11 +8,78 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tokio_stream::StreamExt;
 
+use crate::components::{ComponentVersion, repository};
 use crate::settings::GlobalSettings;
 
+// Legacy constants for backward compatibility with existing download functions
+// These are used by prepare_steamrt, download_steamrt, and related legacy functions
+// New code should use fetch_versions() to get current version from repository
 pub const STEAMRT_VERSION: &str = "3.0.20251216.191774";
 const STEAMRT_BASE_URL: &str = "https://repo.steampowered.com/steamrt3/images";
 const STEAMRT_TARBALL: &str = "SteamLinuxRuntime_sniper.tar.xz";
+
+#[derive(Deserialize)]
+struct SteamRtEntry {
+    name: String,
+    version: String,
+    url: String,
+}
+
+/// # Errors
+/// Returns an error if fetching or parsing component versions fails.
+pub async fn fetch_versions(_components_dir: &PathBuf) -> Result<Vec<ComponentVersion>> {
+    // Fetch the components index
+    let index = repository::fetch_components_index().await?;
+    
+    if index.components.runtime.is_empty() {
+        eprintln!("[SteamRT] No runtime configs found in index");
+        return Ok(Vec::new());
+    }
+    
+    let mut all_versions = Vec::new();
+    
+    // Fetch and parse each runtime component JSON file listed in the index
+    for component_config in index.components.runtime {
+        // Only process steamrt entries
+        if component_config.id != "steamrt" {
+            continue;
+        }
+        
+        eprintln!("[SteamRT] Loading component: {} from {}", component_config.name, component_config.config);
+        
+        match repository::fetch_component_json(&component_config.config).await {
+            Ok(content) => {
+                match serde_json::from_str::<SteamRtEntry>(&content) {
+                    Ok(entry) => {
+                        // Construct the full download URL
+                        let download_url = format!("{}/{}/{}", entry.url, entry.version, entry.name);
+                        
+                        if let Ok(url) = Url::parse(&download_url) {
+                            let version = ComponentVersion {
+                                version: entry.version.clone(),
+                                download_url: url,
+                                display_name: format!("Steam Runtime {}", entry.version),
+                                source: Some(component_config.id.clone()),
+                            };
+                            eprintln!("[SteamRT] Loaded version: {}", entry.version);
+                            all_versions.push(version);
+                        } else {
+                            eprintln!("[SteamRT] Failed to parse URL: {download_url}");
+                        }
+                    }
+                    Err(err) => {
+                        eprintln!("[SteamRT] Failed to parse JSON from {}: {err}", component_config.config);
+                    }
+                }
+            }
+            Err(err) => {
+                eprintln!("[SteamRT] Failed to fetch {}: {err}", component_config.config);
+            }
+        }
+    }
+
+    Ok(all_versions)
+}
 
 #[derive(Debug)]
 pub struct SteamRtSetup {

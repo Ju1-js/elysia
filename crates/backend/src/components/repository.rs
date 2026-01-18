@@ -25,6 +25,8 @@ pub struct ComponentsMap {
     pub proton: Vec<ComponentConfig>,
     #[serde(default)]
     pub dxvk: Vec<ComponentConfig>,
+    #[serde(default)]
+    pub runtime: Vec<ComponentConfig>,
 }
 
 /// Fetch the components index from the remote repository
@@ -47,6 +49,7 @@ pub async fn fetch_components_index() -> Result<ComponentsIndex> {
     eprintln!("  - Wine components: {}", index.components.wine.len());
     eprintln!("  - Proton components: {}", index.components.proton.len());
     eprintln!("  - DXVK components: {}", index.components.dxvk.len());
+    eprintln!("  - Runtime components: {}", index.components.runtime.len());
     
     Ok(index)
 }

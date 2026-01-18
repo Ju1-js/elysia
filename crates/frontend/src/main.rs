@@ -200,8 +200,19 @@ fn app() -> Element {
         if !game_state_initialized() {
             let settings_clone = init_settings.read().clone();
             let mut state_signal = game_state;
+            let component_svc = component_service;
 
             spawn(async move {
+                // Wait for ComponentService to be initialized
+                while component_svc.read().is_none() {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                }
+                
+                let Some(service) = component_svc.read().clone() else {
+                    debug_error!("ComponentService not available");
+                    return;
+                };
+
                 // Check system status
                 let (sys_status_check_data, runner_type, configured_wine_version, configured_proton_version, configured_dxvk_version, components_dir) = {
                     let Ok(settings_guard) = settings_clone.read() else {
@@ -251,7 +262,10 @@ fn app() -> Element {
                     (settings_data, runner_type, configured_wine_version, configured_proton_version, configured_dxvk_version, components_dir)
                 };
 
-                let sys_status = SystemStatus::check(&sys_status_check_data).await;
+                // Use the cached ComponentManager from the service
+                let manager = service.manager();
+                let manager_guard = manager.read().await;
+                let sys_status = SystemStatus::check(&sys_status_check_data, &manager_guard);
                 system_status.set(Some(sys_status.clone()));
 
                 // Set the runner type in GlobalGameState first

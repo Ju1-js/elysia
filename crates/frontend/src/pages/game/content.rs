@@ -421,6 +421,11 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
         .as_ref()
         .is_some_and(backend::status::SystemStatus::tweaks_need_update);
 
+    let runtime_needs_update = system_status
+        .read()
+        .as_ref()
+        .is_some_and(backend::status::SystemStatus::runtime_needs_update);
+
     let settings_scale = if show_settings() {
         if settings_scale_anim.is_running() {
             f64::from(settings_scale_anim.get().read().read())
@@ -540,6 +545,7 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
                                 game_state,
                                 game_needs_tweaks,
                                 tweaks_needs_update,
+                                runtime_needs_update,
                             }
                         }
                     }

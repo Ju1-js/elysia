@@ -9,18 +9,33 @@ use crate::debug_info;
 pub fn Home() -> Element {
     let settings = use_context::<Signal<Arc<RwLock<GlobalSettings>>>>();
     let mut system_status = use_context::<Signal<Option<SystemStatus>>>();
+    let component_service = use_context::<Signal<Option<crate::services::ComponentService>>>();
 
     // Check component status once on Home page mount
     use_effect(use_reactive!(|| {
         let settings_arc = settings.read().clone();
+        let component_svc = component_service;
         spawn(async move {
+            // Wait for ComponentService to be ready
+            while component_svc.read().is_none() {
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            }
+            
+            let Some(service) = component_svc.read().clone() else {
+                return;
+            };
+            
             let settings_data = {
                 let Ok(s) = settings_arc.read() else { return };
                 // Clone the data we need before the await
                 s.clone()
             };
             debug_info!("Checking system component status...");
-            let status = SystemStatus::check(&settings_data).await;
+            
+            // Use the cached ComponentManager from the service
+            let manager = service.manager();
+            let manager_guard = manager.read().await;
+            let status = SystemStatus::check(&settings_data, &manager_guard);
             debug_info!(
                 "Status check complete - Runtime ready: {}, Tweaks ready: {}",
                 status.runtime_ready(),

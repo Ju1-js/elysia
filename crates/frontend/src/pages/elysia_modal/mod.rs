@@ -16,7 +16,7 @@ pub fn ElysiaModal(on_close: EventHandler<()>, scale: f64) -> Element {
     };
 
     let on_open_repository = move |_| {
-        let url = "https://dawn.wine/dawn-winery/elysia";
+        let url = "https://dawn.wine/elysia/elysia";
         
         if let Err(e) = std::process::Command::new("xdg-open")
             .arg(url)

@@ -276,35 +276,40 @@ pub fn create_component_setup_handler(
                     result
                 }
                 super::state::RunnerType::Proton => {
-                    let mut result = Ok(());
+                    debug!("Checking Proton runtime components...");
+
+                    // install_proton_runtime already checks needs_update internally,
+                    // so we call it regardless of proton_ready status to handle both
+                    // initial installation and updates
+                    let result = {
+                        let mut component_manager = manager_arc.write().await;
+                        backend::runners::Runners::download_proton_runtime(
+                            &settings_data,
+                            &mut component_manager,
+                            Some(&tracker),
+                            "runtime_setup",
+                        )
+                        .await
+                    };
                     
-                    if !state_signal.read().component_setup.proton_ready {
-                        debug!("Downloading Proton runtime components...");
-
-                        result = {
-                            let mut component_manager = manager_arc.write().await;
-                            backend::runners::Runners::download_proton_runtime(
-                                &settings_data,
-                                &mut component_manager,
-                                Some(&tracker),
-                                "runtime_setup",
-                            )
-                            .await
-                        };
-                        
-                        match result {
-                            Ok(()) => {
-                                debug!("UMU and SteamRT downloaded successfully");
-                            }
-                            Err(ref e) => {
-                                debug_error!("Failed to download UMU/SteamRT: {}", e);
-                                tracker.clear("runtime_setup");
-                                state_signal.write().set_runtime_active(false);
-                                return;
-                            }
+                    match result {
+                        Ok(()) => {
+                            debug!("UMU and SteamRT download completed (installed or already up to date)");
                         }
+                        Err(ref e) => {
+                            debug_error!("Failed to download UMU/SteamRT: {}", e);
+                            tracker.clear("runtime_setup");
+                            state_signal.write().set_runtime_active(false);
+                            return;
+                        }
+                    }
 
-                        debug!("Step 3/3: Downloading Proton...");
+                    // Only download Proton if it's not ready or needs update
+                    if state_signal.read().component_setup.proton_ready {
+                        debug!("Proton already installed");
+                        Ok(())
+                    } else {
+                        debug!("Downloading Proton...");
 
                         let proton_result = {
                             let mut component_manager = manager_arc.write().await;
@@ -341,9 +346,8 @@ pub fn create_component_setup_handler(
                                 return;
                             }
                         }
-                        result = proton_result.map(|_| ());
+                        proton_result.map(|_| ())
                     }
-                    result
                 }
             };
 
@@ -351,7 +355,8 @@ pub fn create_component_setup_handler(
                 // Clone settings data before await to avoid holding lock
                 let settings_data = settings_arc.read().ok().map(|guard| guard.clone());
                 if let Some(settings) = settings_data {
-                    let new_status = SystemStatus::check(&settings).await;
+                    let manager_guard = manager_arc.read().await;
+                    let new_status = SystemStatus::check(&settings, &manager_guard);
                     system_status.set(Some(new_status));
                 }
             }
@@ -465,7 +470,8 @@ pub fn create_tweaks_setup_handler(
                     // Clone settings data before await to avoid holding lock
                     let settings_data = settings_arc.read().ok().map(|guard| guard.clone());
                     if let Some(settings) = settings_data {
-                        let new_status = SystemStatus::check(&settings).await;
+                        let manager_guard = manager_arc.read().await;
+                        let new_status = SystemStatus::check(&settings, &manager_guard);
                         system_status.set(Some(new_status));
                     }
                 }

@@ -21,21 +21,18 @@ pub struct SystemStatus {
 }
 
 impl SystemStatus {
-    pub async fn check(settings: &GlobalSettings) -> Self {
-        let mut component_manager = ComponentManager::new().await;
-
-        // fixme: avoid umu rates locks :xdx:
-        let hardcoded_umu_version = "1.3.0";
+    #[must_use]
+    pub fn check(settings: &GlobalSettings, component_manager: &ComponentManager) -> Self {
+        // Check UMU status
         let umu_installed_version =
             component_manager.get_installed_version(settings, ComponentType::Umu);
         let umu_installed = umu_installed_version.is_some();
-        let umu_needs_update = umu_installed_version
-            .as_ref()
-            .is_some_and(|v| v != hardcoded_umu_version);
+        let umu_latest = component_manager
+            .get_latest_version(ComponentType::Umu)
+            .map(|v| v.version.clone());
+        let umu_needs_update = component_manager.needs_update(settings, ComponentType::Umu);
 
-        let _ = component_manager
-            .refresh_component(ComponentType::Jadeite)
-            .await;
+        // Check Jadeite status
         let jadeite_installed_version =
             component_manager.get_installed_version(settings, ComponentType::Jadeite);
         let jadeite_installed = jadeite_installed_version.is_some();
@@ -44,12 +41,14 @@ impl SystemStatus {
             .map(|v| v.version.clone());
         let jadeite_needs_update = component_manager.needs_update(settings, ComponentType::Jadeite);
 
-        let steamrt_dir = settings.components_directory.join("steamrt");
-        let steamrt_version_dir = steamrt_dir.join(crate::components::steamrt::STEAMRT_VERSION);
-        let steamrt_installed = steamrt_version_dir.exists()
-            && steamrt_version_dir
-                .join(".elysia_steamrt_installed")
-                .exists();
+        // Check SteamRT status
+        let steamrt_installed_version =
+            component_manager.get_installed_version(settings, ComponentType::SteamRuntime);
+        let steamrt_installed = steamrt_installed_version.is_some();
+        let steamrt_latest = component_manager
+            .get_latest_version(ComponentType::SteamRuntime)
+            .map(|v| v.version.clone());
+        let steamrt_needs_update = component_manager.needs_update(settings, ComponentType::SteamRuntime);
 
         let proton_installed_version =
             component_manager.get_installed_version(settings, ComponentType::Proton);
@@ -67,7 +66,7 @@ impl SystemStatus {
             umu: ComponentStatus {
                 installed: umu_installed,
                 installed_version: umu_installed_version,
-                latest_version: Some(hardcoded_umu_version.to_string()),
+                latest_version: umu_latest,
                 needs_update: umu_needs_update,
             },
             jadeite: ComponentStatus {
@@ -78,9 +77,9 @@ impl SystemStatus {
             },
             steamrt: ComponentStatus {
                 installed: steamrt_installed,
-                installed_version: None,
-                latest_version: None,
-                needs_update: false,
+                installed_version: steamrt_installed_version,
+                latest_version: steamrt_latest,
+                needs_update: steamrt_needs_update,
             },
             proton: ComponentStatus {
                 installed: proton_installed,
@@ -115,7 +114,7 @@ impl SystemStatus {
 
     #[must_use] 
     pub fn runtime_needs_update(&self) -> bool {
-        self.umu.needs_update
+        self.umu.needs_update || self.steamrt.needs_update
     }
 
     #[must_use] 
