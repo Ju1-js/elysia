@@ -23,7 +23,8 @@ jobs:
           apt-get remove -y needrestart || true
           apt-get install -y git flatpak flatpak-builder python3 python3-pip wget sudo python3-aiohttp python3-tomlkit python3-yaml
           flatpak remote-add --system --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          flatpak install --system -y flathub org.gnome.Platform//49 org.gnome.Sdk//49
+          flatpak install --system -y flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
+          flatpak install --system -y flathub org.freedesktop.Platform.codecs-extra//25.08-extra
           flatpak install --system -y flathub org.freedesktop.Sdk.Extension.rust-nightly//25.08
           flatpak install --system -y flathub org.freedesktop.Sdk.Extension.llvm21//25.08
 
@@ -35,12 +36,12 @@ jobs:
       - name: Build Flatpak
         working-directory: ./flatpak
         run: |
-          flatpak-builder --repo=repo --force-clean build-dir wine.dawn.dawnwinery.elysia.yml
+          flatpak-builder --repo=repo --force-clean build-dir gay.elysia.elysia.yml
 
       - name: Create bundle
         working-directory: ./flatpak
         run: |
-          flatpak build-bundle repo elysia.flatpak wine.dawn.dawnwinery.elysia
+          flatpak build-bundle repo elysia.flatpak gay.elysia.elysia
           sha512sum elysia.flatpak > elysia.flatpak.sha512sum
 
       - name: Upload artifact elysia.flatpak

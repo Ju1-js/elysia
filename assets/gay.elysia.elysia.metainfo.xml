@@ -1,0 +1,38 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<component type="desktop-application">
+  <id>gay.elysia.elysia</id>
+  <name>Elysia</name>
+  <summary>The platform for your favourite anime games!</summary>
+  <description>
+    <p>Elysia is a launcher for multiple anime games, with community patches and Proton/Wine support.</p>
+  </description>
+  <developer id="gay.elysia">
+    <name>Elysia Team</name>
+  </developer>
+  <screenshots>
+    <screenshot type="default">
+        <image>https://dawn.wine/elysia/elysia/raw/commit/23c0122865e9452a0c2d7faf5d6b050c366a284d/assets/images/ak-e.png</image>
+        <caption>AK-E download page</caption>
+    </screenshot>
+  </screenshots>
+  <launchable type="desktop-id">gay.elysia.elysia.desktop</launchable>
+  <url type="homepage">https://dawn.wine/elysia/elysia</url>
+  <url type="bugtracker">https://dawn.wine/elysia/elysia/issues</url>
+  <project_license>GPL-3.0-or-later</project_license>
+  <metadata_license>CC0-1.0</metadata_license>
+  <categories>
+    <category>Game</category>
+  </categories>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.1.0" date="2026-01-18">
+      <description>
+        <p>First release! Experimental AK-E support.</p>
+      </description>
+    </release>
+  </releases>
+  <branding>
+    <color type="primary" scheme_preference="light">#f6c1d9</color>
+    <color type="primary" scheme_preference="dark">#3a1626</color>
+  </branding>
+</component>
