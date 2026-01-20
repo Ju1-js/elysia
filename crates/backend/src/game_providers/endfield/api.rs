@@ -16,6 +16,8 @@ pub struct ProxyRsp {
     pub get_latest_game_rsp: Option<GetLatestGameRsp>,
     #[serde(default)]
     pub get_main_bg_image_rsp: Option<GetMainBgImageRsp>,
+    #[serde(default)]
+    pub get_single_ent_rsp: Option<GetSingleEntRsp>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,4 +78,28 @@ pub struct MainBgImage {
     pub md5: Option<String>,
     #[serde(default)]
     pub video_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetSingleEntRsp {
+    pub single_ent: Option<SingleEnt>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SingleEnt {
+    pub version_url: String,
+    #[serde(default)]
+    pub version_md5: Option<String>,
+    #[serde(default)]
+    pub jump_url: Option<String>,
+    #[serde(default)]
+    pub button_url: Option<String>,
+    #[serde(default)]
+    pub button_md5: Option<String>,
+    #[serde(default)]
+    pub button_hover_url: Option<String>,
+    #[serde(default)]
+    pub button_hover_md5: Option<String>,
+    #[serde(default)]
+    pub need_token: Option<bool>,
 }

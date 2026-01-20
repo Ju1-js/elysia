@@ -469,6 +469,7 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
                 theme_fade_progress,
                 static_bg_url: parsed_bg_url,
                 on_video_ready: move |()| video_ready.set(true),
+                game_biz: game_data.biz.clone(),
             }
 
             rect {

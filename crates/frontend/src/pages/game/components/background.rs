@@ -36,6 +36,7 @@ pub fn BackgroundLayers(
     theme_fade_progress: f64,
     static_bg_url: Url,
     on_video_ready: EventHandler<()>,
+    game_biz: String,
 ) -> Element {
     let mut video_state = use_context::<Signal<VideoState>>();
 
@@ -257,6 +258,14 @@ pub fn BackgroundLayers(
     let secondary_url = if is_paused { None } else { vs.secondary_url().read().clone() };
     drop(vs);
 
+    // Compute theme overlay styling based on game type
+    let is_endfield = game_biz == "endfield";
+    let (theme_width, theme_height, theme_main_align, theme_cross_align, theme_position_top, theme_position_left, theme_offset_base) = if is_endfield {
+        ("46%", "46%", "center", "start", "125", "370", -280.0)
+    } else {
+        ("100%", "100%", "end", "end", "0", "25", -25.0)
+    };
+
     rsx! {
         rect {
             position: "absolute",
@@ -381,12 +390,14 @@ pub fn BackgroundLayers(
             if let Ok(prev_theme_parsed) = prev_theme.parse::<Url>() {
                 rect {
                     position: "absolute",
-                    position_top: "0",
-                    position_left: "25",
-                    width: "100%",
-                    height: "100%",
+                    position_top: "{theme_position_top}",
+                    position_left: "{theme_position_left}",
+                    width: "{theme_width}",
+                    height: "{theme_height}",
+                    main_align: "{theme_main_align}",
+                    cross_align: "{theme_cross_align}",
                     layer: "1",
-                    offset_x: "{-25.0 - (30.0 * theme_fade_progress)}",
+                    offset_x: "{theme_offset_base - (30.0 * theme_fade_progress)}",
                     opacity: "{1.0 - theme_fade_progress}",
                     MyNetworkImage {
                         url: prev_theme_parsed,
@@ -400,12 +411,14 @@ pub fn BackgroundLayers(
             if let Ok(theme_parsed) = theme.parse::<Url>() {
                 rect {
                     position: "absolute",
-                    position_top: "0",
-                    position_left: "25",
-                    width: "100%",
-                    height: "100%",
+                    position_top: "{theme_position_top}",
+                    position_left: "{theme_position_left}",
+                    width: "{theme_width}",
+                    height: "{theme_height}",
+                    main_align: "{theme_main_align}",
+                    cross_align: "{theme_cross_align}",
                     layer: "1",
-                    offset_x: "{-25.0 + (30.0 * (1.0 - theme_fade_progress))}",
+                    offset_x: "{theme_offset_base + (30.0 * (1.0 - theme_fade_progress))}",
                     opacity: "{theme_fade_progress}",
                     MyNetworkImage {
                         url: theme_parsed,

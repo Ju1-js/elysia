@@ -157,7 +157,7 @@ fn app() -> Element {
             }
         }
 
-        let api_game_basic_info = if should_show_hoyo_games() {
+        let mut api_game_basic_info = if should_show_hoyo_games() {
             backend::game_providers::hoyoplay::get_all_game_basic_info(&settings_data, None)
                 .await
                 .map_or_else(|err| {
@@ -167,6 +167,13 @@ fn app() -> Element {
         } else {
             Vec::new()
         };
+
+        // Add endfield game basic info
+        if let Ok(endfield_info) = backend::game_providers::endfield::get_game_basic_info().await {
+            api_game_basic_info.extend(endfield_info);
+        } else {
+            debug_error!("Failed to load endfield game basic info");
+        }
 
         Context {
             api_games,
