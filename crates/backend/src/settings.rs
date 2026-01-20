@@ -110,6 +110,8 @@ pub struct InstalledGame {
     pub enable_winewayland: bool,
     pub enable_mangohud: bool,
     pub enable_gamemode: bool,
+    #[serde(default)]
+    pub use_directx11: bool,
 }
 
 impl Default for InstalledGame {
@@ -129,6 +131,7 @@ impl Default for InstalledGame {
             enable_winewayland: false,
             enable_mangohud: false,
             enable_gamemode: false,
+            use_directx11: false,
         }
     }
 }
@@ -154,6 +157,8 @@ pub struct GamePreferences {
     pub enable_gamemode: bool,
     #[serde(default)]
     pub playtime_seconds: u64,
+    #[serde(default)]
+    pub use_directx11: bool,
 }
 
 impl Default for GamePreferences {
@@ -168,6 +173,7 @@ impl Default for GamePreferences {
             enable_mangohud: false,
             enable_gamemode: false,
             playtime_seconds: 0,
+            use_directx11: false,
         }
     }
 }

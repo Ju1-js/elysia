@@ -761,6 +761,7 @@ pub fn save_settings_to_disk_sync(
                     enable_mangohud: params.mangohud,
                     enable_gamemode: params.gamemode,
                     playtime_seconds: existing_playtime,
+                    use_directx11: false,
                 };
 
                 debug_info!("Saving default preferences - runner: {:?}", runner);
@@ -792,6 +793,7 @@ pub fn save_settings_to_disk_sync(
                         enable_mangohud: params.mangohud,
                         enable_gamemode: params.gamemode,
                         playtime_seconds: existing_playtime,
+                        use_directx11: false,
                     },
                 );
 

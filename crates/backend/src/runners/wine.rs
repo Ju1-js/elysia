@@ -277,6 +277,11 @@ impl Wine {
             wine_args.extend(args.iter().cloned());
         }
 
+        // Add DirectX11 flag if enabled
+        if game.use_directx11 {
+            wine_args.push("-force-d3d11".to_string());
+        }
+
         Ok(wine_args)
     }
 

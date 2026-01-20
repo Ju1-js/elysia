@@ -268,6 +268,9 @@ fn ActionButton(
     let settings = use_context::<Signal<std::sync::Arc<std::sync::RwLock<backend::settings::GlobalSettings>>>>();
     let game_running = game_state.read().is_game_running();
     
+    // Clone game_id for use in the closure
+    let game_id_for_closure = game_id.clone();
+    
     // Don't show button while any operation is in progress
     if runtime_busy || tweaks_busy || game_busy {
         return rsx! {};
@@ -312,11 +315,11 @@ fn ActionButton(
             if let Ok(mut settings_guard) = settings_arc.write() {
                 // Get or create game preferences for this game
                 let prefs = settings_guard.game_preferences
-                    .entry(game_id.clone())
+                    .entry(game_id_for_closure.clone())
                     .or_insert_with(backend::settings::GamePreferences::default);
                 
                 prefs.playtime_seconds += elapsed_seconds;
-                eprintln!("[ActionButton] Total playtime for {}: {} seconds", game_id, prefs.playtime_seconds);
+                eprintln!("[ActionButton] Total playtime for {}: {} seconds", game_id_for_closure, prefs.playtime_seconds);
                 
                 // Save settings to persist playtime
                 if let Err(e) = settings_guard.save() {
@@ -401,6 +404,14 @@ fn ActionButton(
                             "{label}"
                         }
                     }
+                }
+            }
+
+            // DirectX11 checkbox - only show when game is installed and ready to launch
+            if runtime_ready && (!game_needs_tweaks || tweaks_ready) && installed && !game_running {
+                DirectX11Checkbox {
+                    game_id: game_id.clone(),
+                    settings,
                 }
             }
 
@@ -1106,6 +1117,99 @@ pub fn ImportGameModal(
                             "Import"
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn DirectX11Checkbox(
+    game_id: String,
+    settings: Signal<std::sync::Arc<std::sync::RwLock<backend::settings::GlobalSettings>>>,
+) -> Element {
+    // Get current state from game preferences
+    let use_directx11 = {
+        let settings_guard = settings.read();
+        if let Ok(s) = settings_guard.read() {
+            s.game_preferences
+                .get(&game_id)
+                .map(|prefs| prefs.use_directx11)
+                .or_else(|| s.installed_games.get(&game_id).map(|game| game.use_directx11))
+                .unwrap_or(false)
+        } else {
+            false
+        }
+    };
+
+    let mut checked = use_signal(|| use_directx11);
+
+    let on_toggle = move |_| {
+        let new_value = !*checked.read();
+        checked.set(new_value);
+
+        // Save to both game preferences and installed game
+        if let Ok(mut settings_guard) = settings.read().write() {
+            // Update game preferences
+            let prefs = settings_guard.game_preferences
+                .entry(game_id.clone())
+                .or_insert_with(backend::settings::GamePreferences::default);
+            prefs.use_directx11 = new_value;
+
+            // Update installed game if it exists
+            if let Some(game) = settings_guard.installed_games.get_mut(&game_id) {
+                game.use_directx11 = new_value;
+            }
+
+            // Save settings
+            if let Err(e) = settings_guard.save() {
+                eprintln!("[DirectX11Checkbox] Failed to save settings: {e}");
+            }
+        }
+    };
+
+    rsx! {
+        rect {
+            width: "100%",
+            main_align: "center",
+            padding: "0 0 0 12",
+
+            rect {
+                direction: "horizontal",
+                spacing: "8",
+                cross_align: "center",
+                padding: "6 12",
+                corner_radius: "6",
+                background: "rgb(35, 35, 40)",
+                background_opacity: "0.4",
+                border: "1 inner rgb(255, 255, 255, 0.1)",
+                shadow: "0 1 4 0 rgb(0, 0, 0, 0.3)",
+                backdrop_blur: "8",
+                onclick: on_toggle,
+
+                // Checkbox
+                rect {
+                    width: "16",
+                    height: "16",
+                    corner_radius: "3",
+                    background: if *checked.read() { "rgb(70, 90, 170)" } else { "rgb(50, 50, 55)" },
+                    border: "1 solid rgb(255, 255, 255, 0.2)",
+                    main_align: "center",
+                    cross_align: "center",
+
+                    if *checked.read() {
+                        svg {
+                            width: "12",
+                            height: "12",
+                            svg_content: r#"<svg viewBox="0 0 24 24" fill="white"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>"#
+                        }
+                    }
+                }
+
+                label {
+                    font_size: "12",
+                    color: "white",
+                    "Launch with DirectX11"
                 }
             }
         }

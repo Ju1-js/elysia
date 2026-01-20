@@ -203,6 +203,11 @@ impl Proton {
             args.extend(game_args.iter().cloned());
         }
 
+        // Add DirectX11 flag if enabled
+        if game.use_directx11 {
+            args.push("-force-d3d11".to_string());
+        }
+
         Ok(args)
     }
 

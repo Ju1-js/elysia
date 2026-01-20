@@ -118,14 +118,18 @@ pub fn poll_download(
 
                 drop(state);
 
-                // Update local display
-                progress.set(current.clone());
-
-                if let Some(p) = current
-                    && !p.is_busy {
+                // Update local display - only show progress if still busy
+                if let Some(p) = current.clone() {
+                    if p.is_busy {
+                        progress.set(Some(p));
+                    } else {
+                        // Download completed, clear progress display
                         progress.set(None);
                         break;
                     }
+                } else {
+                    progress.set(None);
+                }
 
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
