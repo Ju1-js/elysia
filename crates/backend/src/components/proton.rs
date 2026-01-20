@@ -55,5 +55,21 @@ pub async fn fetch_versions(_components_dir: &PathBuf) -> Result<Vec<ComponentVe
         }
     }
 
+    // Sort versions to prioritize dwproton first, then by source name
+    all_versions.sort_by(|a, b| {
+        let a_source = a.source.as_deref().unwrap_or("");
+        let b_source = b.source.as_deref().unwrap_or("");
+        
+        // dwproton should come first
+        let a_is_dwproton = a_source.eq_ignore_ascii_case("dwproton");
+        let b_is_dwproton = b_source.eq_ignore_ascii_case("dwproton");
+        
+        match (a_is_dwproton, b_is_dwproton) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a_source.cmp(b_source),
+        }
+    });
+
     Ok(all_versions)
 }

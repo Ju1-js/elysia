@@ -304,9 +304,29 @@ pub fn create_component_setup_handler(
                         }
                     }
 
-                    // Only download Proton if it's not ready or needs update
-                    if state_signal.read().component_setup.proton_ready {
+                    // Check if Proton is installed
+                    let proton_installed = service
+                        .is_installed(&settings_data, backend::components::ComponentType::Proton).await;
+                    
+                    // Skip Proton download since already installed, but re-check all runtime component status
+                    if proton_installed {
                         debug!("Proton already installed");
+                        
+                        // Re-check all runtime components and update state
+                        let umu_installed = service
+                            .is_installed(&settings_data, backend::components::ComponentType::Umu).await;
+                        let steamrt_installed = service.is_installed(
+                            &settings_data,
+                            backend::components::ComponentType::SteamRuntime,
+                        ).await;
+                        
+                        let all_ready = proton_installed && umu_installed && steamrt_installed;
+                        state_signal.write().set_proton_ready(all_ready);
+                        debug!(
+                            "Updated proton_ready: {} (proton: {}, umu: {}, steamrt: {})",
+                            all_ready, proton_installed, umu_installed, steamrt_installed
+                        );
+                        
                         Ok(())
                     } else {
                         debug!("Downloading Proton...");
@@ -325,8 +345,22 @@ pub fn create_component_setup_handler(
                         
                         match &proton_result {
                             Ok(downloaded_version) => {
-                                state_signal.write().set_proton_ready(true);
-                                debug!("All Proton components downloaded successfully: Proton version {}", downloaded_version);
+                                // Verify all runtime components are installed before marking ready
+                                let proton_installed = service
+                                    .is_installed(&settings_data, backend::components::ComponentType::Proton).await;
+                                let umu_installed = service
+                                    .is_installed(&settings_data, backend::components::ComponentType::Umu).await;
+                                let steamrt_installed = service.is_installed(
+                                    &settings_data,
+                                    backend::components::ComponentType::SteamRuntime,
+                                ).await;
+                                
+                                let all_ready = proton_installed && umu_installed && steamrt_installed;
+                                state_signal.write().set_proton_ready(all_ready);
+                                debug!(
+                                    "All Proton components status - Proton version {}, all_ready: {} (proton: {}, umu: {}, steamrt: {})",
+                                    downloaded_version, all_ready, proton_installed, umu_installed, steamrt_installed
+                                );
                                 
                                 // Update default_preferences with the downloaded Proton version
                                 if let Ok(mut settings_guard) = settings_arc.write() {
