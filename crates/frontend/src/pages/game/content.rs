@@ -439,6 +439,15 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
     let game_id_for_import = game_data.id.clone();
     let game_biz_for_import = game_data.biz.clone();
     let _game_name_for_import = game_data.display.name.clone();
+    
+    // Clone values for install modal (used in closure)
+    let game_id_for_install_closure = game_data.id.clone();
+    let game_biz_for_install_closure = game_data.biz.clone();
+    
+    // Clone values for install modal props (used outside closure)
+    let game_id_for_install = game_data.id.clone();
+    let game_biz_for_install = game_data.biz.clone();
+    let game_name_for_install = game_data.display.name.clone();
 
     rsx! {
         rect {
@@ -590,12 +599,61 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
                                     let _ = settings_guard.save();
                                 }
                             }
-                            // Close modal - user should click the button again to start download
+                            // Close modal and trigger download
                             show_install_modal.set(false);
+                            
+                            // Start the game download
+                            let game_id = game_id_for_install_closure.clone();
+                            let game_biz = game_biz_for_install_closure.clone();
+                            let settings_arc = settings.peek().clone();
+                            let mut game_state_clone = game_state;
+                            
+                            spawn(async move {
+                                eprintln!("[Game Download] Starting download for game: {game_id}");
+                                
+                                game_state_clone.write().set_download_active(&game_id, true);
+                                
+                                let installer = {
+                                    let Ok(settings_guard) = settings_arc.read() else {
+                                        game_state_clone.write().set_download_active(&game_id, false);
+                                        return;
+                                    };
+                                    
+                                    backend::game_providers::installer::InstallerManager::create_installer(
+                                        &game_id,
+                                        &game_biz,
+                                        settings_guard.temp_directory.clone(),
+                                        settings_guard.games_directory.clone(),
+                                    )
+                                };
+                                
+                                if let Some(inst) = installer {
+                                    match inst.install().await {
+                                        Ok(installed_game) => {
+                                            if let Ok(mut settings_guard) = settings_arc.write() {
+                                                settings_guard.installed_games.insert(game_id.clone(), installed_game);
+                                                
+                                                if let Err(e) = settings_guard.save() {
+                                                    eprintln!("Failed to save settings: {e}");
+                                                }
+                                            }
+                                            
+                                            game_state_clone.write().set_download_installed(&game_id, true);
+                                        }
+                                        Err(e) => {
+                                            eprintln!("Failed to install game: {e}");
+                                            game_state_clone.write().set_download_active(&game_id, false);
+                                        }
+                                    }
+                                } else {
+                                    eprintln!("No installer available for game: {game_id}");
+                                    game_state_clone.write().set_download_active(&game_id, false);
+                                }
+                            });
                         },
                         settings,
-                        game_name: game_data.display.name.clone(),
-                        game_biz: game_data.biz.clone(),
+                        game_name: game_name_for_install.clone(),
+                        game_biz: game_biz_for_install.clone(),
                     }
                 }
             }

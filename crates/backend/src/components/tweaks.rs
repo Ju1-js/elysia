@@ -34,16 +34,6 @@ impl TweakManifest {
     #[must_use]
     pub fn new() -> Self {
         let mut game_configs = HashMap::new();
-        
-        // Endfield
-        game_configs.insert(
-            "zePXHT2t4L2tKR4m".to_string(),
-            GameConfiguration {
-                tweaks: vec![TweakType::Jadeite],
-                setup_commands: vec![],
-                environment_vars: HashMap::new(),
-            },
-        );
 
         // ZZZ
         game_configs.insert(

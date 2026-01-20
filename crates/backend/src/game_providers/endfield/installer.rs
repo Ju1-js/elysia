@@ -53,7 +53,7 @@ impl GameInstaller for EndfieldInstaller {
     }
 
     fn get_executable_name(&self) -> &'static str {
-        "EndfieldTBeta2.exe"
+        "Endfield.exe"
     }
 
     async fn install(&self) -> Result<InstalledGame, String> {
@@ -62,13 +62,13 @@ impl GameInstaller for EndfieldInstaller {
 
         let body = json!({
             "proxy_reqs": [{
+                "kind": "get_latest_game",
                 "get_latest_game_req": {
                     "appcode": self.appcode,
                     "channel": "6",
-                    "subchannel": "6",
+                    "sub_channel": "6",
                     "version": ""
-                },
-                "kind": "get_latest_game"
+                }
             }]
         });
 
@@ -98,7 +98,7 @@ impl GameInstaller for EndfieldInstaller {
         Ok(InstalledGame {
             id: self.game_id.clone(),
             biz_name: self.biz_name.clone(),
-            executable_path: dest.join("EndfieldTBeta2.exe"),
+            executable_path: dest.join("Endfield.exe"),
             install_path: dest,
             ..Default::default()
         })

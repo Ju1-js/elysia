@@ -228,7 +228,7 @@ pub async fn get_main_bg_image(app_code: &str) -> Result<String, String> {
 /// # Errors
 /// Returns an error if game data cannot be fetched.
 pub async fn get_games() -> Result<GetGames, String> {
-    let app_code = "zePXHT2t4L2tKR4m";
+    let app_code = "YDUTE5gscDZ229CW";
 
     let placeholder_icon = Image {
         url: "https://play-lh.googleusercontent.com/l6FVNa293RykBWy88TqEhUakIcGSC8bRygSnKOBgztln48JX-WzMWnrBAETrKZsxDNC4HhwCsvfle_UI7rBE=w960-h1920-rw".to_string(),
@@ -264,7 +264,7 @@ pub async fn get_games() -> Result<GetGames, String> {
     };
 
     let game = Game {
-        id: "zePXHT2t4L2tKR4m".to_string(),
+        id: "YDUTE5gscDZ229CW".to_string(),
         biz: "endfield".to_string(),
         display,
         reservation: None,
