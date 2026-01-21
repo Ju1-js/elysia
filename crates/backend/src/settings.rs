@@ -19,6 +19,7 @@ pub struct GlobalSettings {
     pub game_preferences: HashMap<String, GamePreferences>,
     pub default_preferences: GamePreferences,
     pub disable_videos: bool,
+    pub last_announcement_hash: Option<String>,
 }
 
 impl Default for GlobalSettings {
@@ -39,6 +40,7 @@ impl Default for GlobalSettings {
             game_preferences: HashMap::new(),
             default_preferences: GamePreferences::default(),
             disable_videos: false,
+            last_announcement_hash: None,
         }
     }
 }
@@ -97,6 +99,7 @@ impl GlobalSettings {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct InstalledGame {
     pub id: String,
     pub biz_name: String,
@@ -148,6 +151,7 @@ type ComponentVersion = String;
 /// Game preferences stored even before a game is installed
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct GamePreferences {
     pub runner: Runners,
     pub runtime_components: Vec<RuntimeComponents>,

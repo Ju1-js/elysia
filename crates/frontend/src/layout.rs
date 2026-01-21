@@ -8,7 +8,7 @@ use reqwest::Url;
 use crate::{
     Context,
     components::{Expand, MyNetworkImage, MySidebarItem},
-    pages::{ErrorPage, Game, Home, Settings, ElysiaModal},
+    pages::{ErrorPage, Game, Home, Settings, ElysiaModal, AnnouncementModal},
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -199,12 +199,80 @@ fn create_scale_animation() -> impl Fn(&mut AnimConfiguration) -> AnimNum {
 #[allow(non_snake_case, clippy::too_many_lines)]
 fn AppLayout() -> Element {
     let ctx_resource = &use_context::<Resource<Context>>();
+    let settings = use_context::<Signal<std::sync::Arc<std::sync::RwLock<backend::settings::GlobalSettings>>>>();
     let selected_game_id = use_signal(|| None::<String>);
     let game_page_state = use_signal(|| GamePageState { prev_game_id: None });
     let mut show_elysia_modal = use_signal(|| false);
+    let mut show_announcement_modal = use_signal(|| false);
+    let mut announcement_message = use_signal(String::new);
+    let mut announcement_checked = use_signal(|| false);
+    let mut announcement_can_close = use_signal(|| false);
+    let mut announcement_seconds_remaining = use_signal(|| 10u32);
     let navigator = use_navigator();
 
     let elysia_scale_anim = use_animation(create_scale_animation());
+    let announcement_scale_anim = use_animation(create_scale_animation());
+
+    // Check for new announcements on boot
+    use_effect(move || {
+        if !announcement_checked() {
+            announcement_checked.set(true);
+            
+            spawn(async move {
+                // Fetch announcement from remote
+                match backend::announcements::fetch_announcement().await {
+                    Ok(text) => {
+                        if text.trim().is_empty() {
+                            // Empty announcement, nothing to display
+                        } else {
+                            let new_hash = backend::announcements::hash_announcement(&text);
+                            
+                            // Check if this is a new announcement
+                            let should_show = {
+                                let settings_lock = settings.read();
+                                if let Ok(settings_data) = settings_lock.read() {
+                                    settings_data.last_announcement_hash.as_ref() != Some(&new_hash)
+                                } else {
+                                    false
+                                }
+                            };
+                            
+                            if should_show {
+                                // Update the last seen hash
+                                {
+                                    let settings_lock = settings.read();
+                                    if let Ok(mut settings_data) = settings_lock.write() {
+                                        settings_data.last_announcement_hash = Some(new_hash.clone());
+                                        let _ = settings_data.save();
+                                    }
+                                }
+                                
+                                // Show the modal
+                                announcement_message.set(text);
+                                show_announcement_modal.set(true);
+                                announcement_scale_anim.start();
+                                
+                                // Start the 10-second countdown
+                                announcement_can_close.set(false);
+                                announcement_seconds_remaining.set(10);
+                                
+                                spawn(async move {
+                                    for i in (0..10).rev() {
+                                        announcement_seconds_remaining.set(i);
+                                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                                    }
+                                    announcement_can_close.set(true);
+                                });
+                            }
+                        }
+                    }
+                    Err(_e) => {
+                        // Failed to fetch announcement, silently ignore
+                    }
+                }
+            });
+        }
+    });
 
     use_context_provider(|| selected_game_id);
     use_context_provider(|| game_page_state);
@@ -218,6 +286,16 @@ fn AppLayout() -> Element {
     let elysia_scale = if show_elysia_modal() {
         if elysia_scale_anim.is_running() {
             f64::from(elysia_scale_anim.get().read().read())
+        } else {
+            1.0
+        }
+    } else {
+        0.92
+    };
+
+    let announcement_scale = if show_announcement_modal() {
+        if announcement_scale_anim.is_running() {
+            f64::from(announcement_scale_anim.get().read().read())
         } else {
             1.0
         }
@@ -325,6 +403,27 @@ fn AppLayout() -> Element {
                                     show_elysia_modal.set(false);
                                 },
                                 scale: elysia_scale,
+                            }
+                        }
+                    }
+
+                    // Announcement modal overlay
+                    if *show_announcement_modal.read() {
+                        rect {
+                            position: "absolute",
+                            position_top: "0",
+                            position_left: "0",
+                            width: "100%",
+                            height: "100%",
+                            layer: "-4",
+                            AnnouncementModal {
+                                on_close: move |()| {
+                                    show_announcement_modal.set(false);
+                                },
+                                scale: announcement_scale,
+                                message: announcement_message(),
+                                can_close: announcement_can_close(),
+                                seconds_remaining: announcement_seconds_remaining(),
                             }
                         }
                     }

@@ -445,7 +445,7 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
     let game_biz_for_install_closure = game_data.biz.clone();
     
     // Clone values for install modal props (used outside closure)
-    let game_id_for_install = game_data.id.clone();
+    let _game_id_for_install = game_data.id.clone();
     let game_biz_for_install = game_data.biz.clone();
     let game_name_for_install = game_data.display.name.clone();
 

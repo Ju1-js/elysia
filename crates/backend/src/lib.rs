@@ -1,3 +1,4 @@
+pub mod announcements;
 pub mod components;
 pub mod game_providers;
 pub mod globals;
