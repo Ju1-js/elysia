@@ -415,7 +415,7 @@ fn AppLayout() -> Element {
                             position_left: "0",
                             width: "100%",
                             height: "100%",
-                            layer: "-4",
+                            layer: "-999",
                             AnnouncementModal {
                                 on_close: move |()| {
                                     show_announcement_modal.set(false);
