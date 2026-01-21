@@ -397,7 +397,7 @@ fn AppLayout() -> Element {
                             position_left: "0",
                             width: "100%",
                             height: "100%",
-                            layer: "-3",
+                            layer: "-999",
                             ElysiaModal {
                                 on_close: move |()| {
                                     show_elysia_modal.set(false);

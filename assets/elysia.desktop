@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=Elysia
 Comment=Universal anime game launcher
-Exec=elysia
+Exec=/usr/bin/elysia
 Icon=elysia
 Terminal=false
 Type=Application
