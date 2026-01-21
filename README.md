@@ -18,7 +18,7 @@
 
 You can grab the latest `elysia.flatpak` from the [Releases](https://dawn.wine/elysia/elysia/releases) page and install it by double clicking it, or with `flatpak install elysia.flatpak`.
 
-### AUR (coming soon!)
+### AUR
 
 ```
 yay -S elysia-bin
