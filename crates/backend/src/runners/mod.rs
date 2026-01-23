@@ -10,6 +10,24 @@ use crate::progress::ProgressTracker;
 pub use crate::runners::{proton::Proton, wine::Wine};
 use crate::settings::{GlobalSettings, InstalledGame};
 
+/// Check if wine is available in the system PATH
+#[must_use]
+pub fn is_system_wine_available() -> bool {
+    which::which("wine").is_ok()
+}
+
+/// Get the directory containing the system wine binary (parent directory)
+/// Returns None if wine is not found in PATH or the parent directory is invalid
+#[must_use]
+pub fn get_system_wine_dir() -> Option<std::path::PathBuf> {
+    which::which("wine").ok()
+        .and_then(|wine_path| {
+            wine_path.parent()
+                .filter(|parent| parent.is_dir())
+                .map(std::path::Path::to_path_buf)
+        })
+}
+
 pub trait Runner {
     /// # Errors
     /// Returns an error if the game cannot be started.

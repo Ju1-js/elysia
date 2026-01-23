@@ -24,10 +24,14 @@ impl Wine {
     /// # Errors
     /// Returns an error if wineserver cannot be executed.
     pub fn kill_wine_process(wine_path: &str, prefix_path: &str) -> Result<()> {
-        // For system wine (indicated by /usr/bin path), use wineserver from PATH directly
-        // This is consistent with version_loader.rs which detects system wine at /usr/bin/wine
-        // This allows the system's wineserver to be found via PATH lookup
-        if wine_path == "/usr/bin" || wine_path.ends_with("/usr/bin") {
+        // For system wine, use wineserver from PATH directly
+        let is_system_wine = if let Some(system_wine_dir) = super::get_system_wine_dir() {
+            std::path::Path::new(wine_path) == system_wine_dir
+        } else {
+            false
+        };
+
+        if is_system_wine {
             let status = std::process::Command::new("wineserver")
                 .arg("-k")
                 .env("WINEPREFIX", prefix_path)

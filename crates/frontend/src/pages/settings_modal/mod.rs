@@ -163,7 +163,7 @@ pub fn SettingsModal(
             // Check if the selected Wine version is installed
             let wine_path = components_dir.join("wine").join(&selected);
             let is_installed = if selected == "system" {
-                std::path::Path::new("/usr/bin/wine").exists()
+                backend::runners::is_system_wine_available()
             } else if !selected.is_empty() {
                 wine_path.exists()
             } else {

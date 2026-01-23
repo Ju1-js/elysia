@@ -96,13 +96,13 @@ pub fn create_game_download_handler(
                             wine.version.clone()
                         });
                     
-                    // For system wine (version="system"), use /usr/bin as the base path
-                    // This is consistent with how system wine is detected in version_loader.rs
-                    // which checks for /usr/bin/wine existence
-                    // This allows the wine and wineserver binaries to be found via PATH lookup
-                    // For custom wine versions, use the components directory path
+                    // For system wine, use the directory from PATH
                     let wine_dir = if resolved_version == "system" {
-                        std::path::PathBuf::from("/usr/bin")
+                        backend::runners::get_system_wine_dir()
+                            .unwrap_or_else(|| {
+                                eprintln!("[Game Launch] Warning: System wine not found in PATH, using /usr/bin as fallback");
+                                std::path::PathBuf::from("/usr/bin")
+                            })
                     } else {
                         let components_path = settings_guard.components_directory.join("wine");
                         components_path.join(&resolved_version)

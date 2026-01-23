@@ -36,19 +36,19 @@ pub async fn load_wine_versions(
             .collect();
 
         // Add System Wine at the END of the list if it exists
-        if std::path::Path::new("/usr/bin/wine").exists() {
+        if backend::runners::is_system_wine_available() {
             version_infos.push(
                 ComponentVersionInfo {
                     internal_name: "system".to_string(),
                     display_name: "System Wine".to_string(),
                 },
             );
-            debug!("system -> System Wine (detected at /usr/bin/wine)");
+            debug!("system -> System Wine (detected from PATH)");
         }
 
         // Check if the specific selected version is installed
         let specific_installed = if selected_version == "system" {
-            std::path::Path::new("/usr/bin/wine").exists()
+            backend::runners::is_system_wine_available()
         } else if !selected_version.is_empty() {
             // Check if the selected version directory exists
             let wine_path = settings.components_directory
