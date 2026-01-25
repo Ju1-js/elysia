@@ -172,7 +172,7 @@ pub fn create_component_setup_handler(
 
             debug!("Re-checking component readiness...");
             
-            let (configured_wine_version, _configured_proton_version) = {
+            let (configured_wine_version, configured_proton_version) = {
                 let runner = settings_data.game_preferences.get(&game_id_for_lookup)
                     .and_then(|prefs| prefs.runner.as_ref())
                     .unwrap_or(&settings_data.default_preferences.runner);
@@ -186,13 +186,19 @@ pub fn create_component_setup_handler(
             
             match runner_type {
                 super::state::RunnerType::Wine => {
-                    // Check if system wine is being used
                     let wine_ready = if configured_wine_version.as_deref() == Some("system") {
                         // System wine is always "ready" if available
                         backend::runners::is_system_wine_available()
+                    } else if let Some(version) = configured_wine_version.as_ref() {
+                        if version.is_empty() || version == "auto" {
+                            service.is_installed(&settings_data, backend::components::ComponentType::Wine).await
+                        } else {
+                            let wine_path = settings_data.components_directory.join("wine").join(version);
+                            debug!("Checking for specific Wine version at: {:?}", wine_path);
+                            wine_path.exists() && wine_path.is_dir()
+                        }
                     } else {
-                        // Otherwise, check if the wine component is installed
-                        service.is_installed(&settings_data, backend::components::ComponentType::Wine).await
+                        false
                     };
                     
                     let dxvk_installed = service
@@ -200,13 +206,23 @@ pub fn create_component_setup_handler(
                     state_signal.write().set_wine_ready(wine_ready);
                     state_signal.write().set_dxvk_ready(dxvk_installed);
                     debug!(
-                        "Wine ready: {} (system: {}), DXVK ready: {}",
-                        wine_ready, configured_wine_version.as_deref() == Some("system"), dxvk_installed
+                        "Wine ready: {} (version: {:?}), DXVK ready: {}",
+                        wine_ready, configured_wine_version, dxvk_installed
                     );
                 }
                 super::state::RunnerType::Proton => {
-                    let proton_installed = service
-                        .is_installed(&settings_data, backend::components::ComponentType::Proton).await;
+                    let proton_installed = if let Some(version) = configured_proton_version.as_ref() {
+                        if version.is_empty() || version == "auto" {
+                            service.is_installed(&settings_data, backend::components::ComponentType::Proton).await
+                        } else {
+                            let proton_path = settings_data.components_directory.join("proton").join(version);
+                            debug!("Checking for specific Proton version at: {:?}", proton_path);
+                            proton_path.exists() && proton_path.is_dir()
+                        }
+                    } else {
+                        false
+                    };
+                    
                     let umu_installed = service
                         .is_installed(&settings_data, backend::components::ComponentType::Umu).await;
                     let steamrt_installed = service.is_installed(
@@ -219,8 +235,8 @@ pub fn create_component_setup_handler(
                     state_signal.write().set_steamrt_ready(steamrt_installed);
                     
                     debug!(
-                        "Proton ready: {}, UMU ready: {}, SteamRT ready: {}",
-                        proton_installed, umu_installed, steamrt_installed
+                        "Proton ready: {} (version: {:?}), UMU ready: {}, SteamRT ready: {}",
+                        proton_installed, configured_proton_version, umu_installed, steamrt_installed
                     );
                 }
             }
@@ -232,9 +248,6 @@ pub fn create_component_setup_handler(
             );
 
             let manager_arc = service.manager();
-            
-            // Note: tokio::sync::RwLock always succeeds in acquiring locks eventually
-            // There's no need to check availability as the lock is async-aware
 
             let setup_result: Result<(), anyhow::Error> = match runner_type {
                 super::state::RunnerType::Wine => {
@@ -247,7 +260,7 @@ pub fn create_component_setup_handler(
                             backend::runners::Runners::download_wine(
                                 &settings_data,
                                 &component_manager,
-                                None,
+                                configured_wine_version.as_deref(),
                                 Some(&tracker),
                                 "runtime_setup",
                             )
@@ -326,14 +339,9 @@ pub fn create_component_setup_handler(
                     debug!("Checking Proton runtime components...");
 
                     // Check current installation status before downloading anything
-                    let proton_installed = service
-                        .is_installed(&settings_data, backend::components::ComponentType::Proton).await;
-                    let umu_installed = service
-                        .is_installed(&settings_data, backend::components::ComponentType::Umu).await;
-                    let steamrt_installed = service.is_installed(
-                        &settings_data,
-                        backend::components::ComponentType::SteamRuntime,
-                    ).await;
+                    let proton_installed = state_signal.read().component_setup.proton_ready;
+                    let umu_installed = state_signal.read().component_setup.umu_ready;
+                    let steamrt_installed = state_signal.read().component_setup.steamrt_ready;
 
                     debug!("Current status - proton: {}, umu: {}, steamrt: {}", 
                         proton_installed, umu_installed, steamrt_installed);
@@ -361,8 +369,17 @@ pub fn create_component_setup_handler(
                                     &settings_data,
                                     backend::components::ComponentType::SteamRuntime,
                                 ).await;
-                                let proton_now = service
-                                    .is_installed(&settings_data, backend::components::ComponentType::Proton).await;
+                                
+                                let proton_now = if let Some(version) = configured_proton_version.as_ref() {
+                                    if version.is_empty() || version == "auto" {
+                                        service.is_installed(&settings_data, backend::components::ComponentType::Proton).await
+                                    } else {
+                                        let proton_path = settings_data.components_directory.join("proton").join(version);
+                                        proton_path.exists() && proton_path.is_dir()
+                                    }
+                                } else {
+                                    false
+                                };
                                 
                                 state_signal.write().set_umu_ready(umu_now);
                                 state_signal.write().set_steamrt_ready(steamrt_now);
@@ -390,7 +407,7 @@ pub fn create_component_setup_handler(
                             backend::runners::Runners::download_proton(
                                 &settings_data,
                                 &mut component_manager,
-                                None,
+                                configured_proton_version.as_deref(),
                                 Some(&tracker),
                                 "runtime_setup",
                             )
@@ -503,9 +520,6 @@ pub fn create_tweaks_setup_handler(
             };
 
             let manager_arc = service.manager();
-            
-            // Note: tokio::sync::RwLock always succeeds in acquiring locks eventually
-            // There's no need to check availability as the lock is async-aware
 
             // Refresh component in a scope
             let refresh_result = {

@@ -247,9 +247,23 @@ impl Runners {
         progress_key: &str,
     ) -> Result<String> {
         let _ = component_manager.refresh_component(ComponentType::Proton).await;
-
-        let display_name = component_manager
-            .get_latest_version(ComponentType::Proton).map_or_else(|| "Proton".to_string(), |v| v.display_name.clone());
+        let display_name = if let Some(requested_version) = version {
+            component_manager
+                .cache
+                .entries
+                .get(&ComponentType::Proton)
+                .and_then(|versions| {
+                    versions.iter()
+                        .find(|v| v.version == requested_version)
+                        .map(|v| v.display_name.clone())
+                })
+                .unwrap_or_else(|| format!("Proton {}", requested_version))
+        } else {
+            // If no version specified, use latest
+            component_manager
+                .get_latest_version(ComponentType::Proton)
+                .map_or_else(|| "Proton".to_string(), |v| v.display_name.clone())
+        };
 
         let dest_path = component_manager
             .download_component(
@@ -296,13 +310,91 @@ impl Runners {
         progress_tracker: Option<&ProgressTracker>,
         progress_key: &str,
     ) -> Result<String> {
-        let display_name = component_manager
-            .get_latest_version(ComponentType::Wine).map_or_else(|| "Wine".to_string(), |v| v.display_name.clone());
+        let display_name = if let Some(requested_version) = version {
+            component_manager
+                .cache
+                .entries
+                .get(&ComponentType::Wine)
+                .and_then(|versions| {
+                    versions.iter()
+                        .find(|v| v.version == requested_version)
+                        .map(|v| v.display_name.clone())
+                })
+                .unwrap_or_else(|| format!("Wine {}", requested_version))
+        } else {
+            // If no version specified, use latest
+            component_manager
+                .get_latest_version(ComponentType::Wine)
+                .map_or_else(|| "Wine".to_string(), |v| v.display_name.clone())
+        };
 
         let dest_path = component_manager
             .download_component(
                 settings,
                 ComponentType::Wine,
+                version,
+                progress_tracker.map(|pt| {
+                    let pt = pt.clone();
+                    let key = progress_key.to_string();
+                    let name = display_name.clone();
+                    Box::new(move |current, total| {
+                        pt.report(&key, &name, crate::progress::ReportParams {
+                            downloaded: current,
+                            total,
+                            is_busy: true,
+                            step_index: None,
+                            total_steps: None,
+                        });
+                    }) as Box<dyn Fn(u64, u64) + Send>
+                }),
+            )
+            .await?;
+
+        if let Some(pt) = progress_tracker {
+            pt.finish(progress_key);
+        }
+
+        // Extract the version from the destination path
+        let downloaded_version = dest_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| anyhow::anyhow!("Failed to extract version from path"))?
+            .to_string();
+
+        Ok(downloaded_version)
+    }
+
+    /// # Errors
+    /// Returns an error if download fails.
+    pub async fn download_dxvk(
+        settings: &GlobalSettings,
+        component_manager: &ComponentManager,
+        version: Option<&str>,
+        progress_tracker: Option<&ProgressTracker>,
+        progress_key: &str,
+    ) -> Result<String> {
+        let display_name = if let Some(requested_version) = version {
+            component_manager
+                .cache
+                .entries
+                .get(&ComponentType::Dxvk)
+                .and_then(|versions| {
+                    versions.iter()
+                        .find(|v| v.version == requested_version)
+                        .map(|v| v.display_name.clone())
+                })
+                .unwrap_or_else(|| format!("DXVK {}", requested_version))
+        } else {
+            // If no version specified, use latest
+            component_manager
+                .get_latest_version(ComponentType::Dxvk)
+                .map_or_else(|| "DXVK".to_string(), |v| v.display_name.clone())
+        };
+
+        let dest_path = component_manager
+            .download_component(
+                settings,
+                ComponentType::Dxvk,
                 version,
                 progress_tracker.map(|pt| {
                     let pt = pt.clone();
@@ -351,53 +443,4 @@ impl Runners {
         )
         .await
     }
-
-    /// # Errors
-    /// Returns an error if download fails.
-    pub async fn download_dxvk(
-        settings: &GlobalSettings,
-        component_manager: &ComponentManager,
-        version: Option<&str>,
-        progress_tracker: Option<&ProgressTracker>,
-        progress_key: &str,
-    ) -> Result<String> {
-        let display_name = component_manager
-            .get_latest_version(ComponentType::Dxvk).map_or_else(|| "DXVK".to_string(), |v| v.display_name.clone());
-
-        let dest_path = component_manager
-            .download_component(
-                settings,
-                ComponentType::Dxvk,
-                version,
-                progress_tracker.map(|pt| {
-                    let pt = pt.clone();
-                    let key = progress_key.to_string();
-                    let name = display_name.clone();
-                    Box::new(move |current, total| {
-                        pt.report(&key, &name, crate::progress::ReportParams {
-                            downloaded: current,
-                            total,
-                            is_busy: true,
-                            step_index: None,
-                            total_steps: None,
-                        });
-                    }) as Box<dyn Fn(u64, u64) + Send>
-                }),
-            )
-            .await?;
-
-        if let Some(pt) = progress_tracker {
-            pt.finish(progress_key);
-        }
-
-        // Extract the version from the destination path
-        let downloaded_version = dest_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .ok_or_else(|| anyhow::anyhow!("Failed to extract version from path"))?
-            .to_string();
-
-        Ok(downloaded_version)
-    }
-
 }

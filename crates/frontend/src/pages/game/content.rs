@@ -27,19 +27,9 @@ use super::helpers;
 use super::state::{GlobalGameStateSignal, RunnerType};
 
 /// Updates component readiness state based on the current runner type.
-///
-/// This helper function consolidates the logic for checking which runtime components
-/// are installed and updating the game state accordingly. It checks:
 /// - For Wine runners: Wine and DXVK installation
 /// - For Proton runners: Proton, UMU launcher, and Steam Runtime installation
 /// - For all runners: Jadeite (tweaks) installation
-///
-/// # Arguments
-/// * `game_state` - Mutable reference to the global game state signal
-/// * `runner_type` - The type of runner (Wine or Proton) to check components for
-/// * `game_id` - The game ID to associate tweaks readiness with
-/// * `component_svc` - The component service for checking installation status
-/// * `settings_guard` - Global settings containing installation paths
 async fn update_component_readiness(
     game_state: &mut GlobalGameStateSignal,
     runner_type: &RunnerType,
@@ -49,23 +39,26 @@ async fn update_component_readiness(
 ) {
     match runner_type {
         RunnerType::Wine => {
-            // Get the configured Wine version for this game using preference inheritance
             let runner = settings_guard.game_preferences.get(game_id)
                 .and_then(|prefs| prefs.runner.as_ref())
                 .unwrap_or(&settings_guard.default_preferences.runner);
             
-            // Check if system wine is configured
             let wine_ready = match runner {
                 backend::runners::Runners::Wine(wine) if wine.version == "system" => {
                     // System wine is always "ready" if available
                     backend::runners::is_system_wine_available()
                 },
-                backend::runners::Runners::Wine(_) => {
-                    // Check if wine component is installed
+                backend::runners::Runners::Wine(wine) if wine.version.is_empty() || wine.version == "auto" => {
                     component_svc.is_installed(
                         settings_guard,
                         backend::components::ComponentType::Wine,
                     ).await
+                },
+                backend::runners::Runners::Wine(wine) => {
+                    let wine_path = settings_guard.components_directory
+                        .join("wine")
+                        .join(&wine.version);
+                    wine_path.exists() && wine_path.is_dir()
                 },
                 _ => false,
             };
@@ -74,6 +67,7 @@ async fn update_component_readiness(
                 settings_guard,
                 backend::components::ComponentType::Dxvk,
             ).await;
+            
             game_state.write().set_wine_ready(wine_ready);
             game_state.write().set_dxvk_ready(dxvk_installed);
             game_state.write().set_proton_ready(false);
@@ -81,11 +75,26 @@ async fn update_component_readiness(
             game_state.write().set_steamrt_ready(false);
         }
         RunnerType::Proton => {
-            // Proton requires Proton itself, UMU launcher, and Steam Runtime
-            let proton_installed = component_svc.is_installed(
-                settings_guard,
-                backend::components::ComponentType::Proton,
-            ).await;
+            let runner = settings_guard.game_preferences.get(game_id)
+                .and_then(|prefs| prefs.runner.as_ref())
+                .unwrap_or(&settings_guard.default_preferences.runner);
+            
+            let proton_installed = match runner {
+                backend::runners::Runners::Proton(proton) if proton.version.is_empty() || proton.version == "auto" => {
+                    component_svc.is_installed(
+                        settings_guard,
+                        backend::components::ComponentType::Proton,
+                    ).await
+                },
+                backend::runners::Runners::Proton(proton) => {
+                    let proton_path = settings_guard.components_directory
+                        .join("proton")
+                        .join(&proton.version);
+                    proton_path.exists() && proton_path.is_dir()
+                },
+                _ => false,
+            };
+            
             let umu_installed = component_svc.is_installed(
                 settings_guard,
                 backend::components::ComponentType::Umu,
