@@ -13,6 +13,7 @@ type GameProgressGetter = Rc<dyn Fn(&str) -> Option<types::DownloadProgress>>;
 type RuntimeProgressGetter = Rc<dyn Fn(&str) -> Option<types::SetupProgress>>;
 type TweaksProgressGetter = Rc<dyn Fn(&str) -> Option<types::SetupProgress>>;
 
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Props)]
 pub struct DownloadControlProps {
     pub game_id: String,
@@ -31,6 +32,8 @@ pub struct DownloadControlProps {
     #[props(default)]
     pub on_download_game: Option<EventHandler<PressEvent>>,
     #[props(default)]
+    pub on_update_game: Option<EventHandler<PressEvent>>,
+    #[props(default)]
     pub on_show_install_modal: Option<EventHandler<()>>,
     #[props(default)]
     pub on_show_import_modal: Option<EventHandler<()>>,
@@ -40,6 +43,8 @@ pub struct DownloadControlProps {
     pub tweaks_needs_update: bool,
     #[props(default = false)]
     pub runtime_needs_update: bool,
+    #[props(default = false)]
+    pub game_needs_update: bool,
 }
 
 impl PartialEq for DownloadControlProps {
@@ -52,6 +57,7 @@ impl PartialEq for DownloadControlProps {
             && self.game_needs_tweaks == other.game_needs_tweaks
             && self.tweaks_needs_update == other.tweaks_needs_update
             && self.runtime_needs_update == other.runtime_needs_update
+            && self.game_needs_update == other.game_needs_update
     }
 }
 
@@ -69,12 +75,14 @@ impl Clone for DownloadControlProps {
             on_setup_runtime: self.on_setup_runtime,
             on_setup_tweaks: self.on_setup_tweaks,
             on_download_game: self.on_download_game,
+            on_update_game: self.on_update_game,
             on_show_install_modal: self.on_show_install_modal,
             on_show_import_modal: self.on_show_import_modal,
             game_state: self.game_state,
             game_needs_tweaks: self.game_needs_tweaks,
             tweaks_needs_update: self.tweaks_needs_update,
             runtime_needs_update: self.runtime_needs_update,
+            game_needs_update: self.game_needs_update,
         }
     }
 }
@@ -93,12 +101,14 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
         on_setup_runtime,
         on_setup_tweaks,
         on_download_game,
+        on_update_game,
         on_show_install_modal,
         on_show_import_modal,
         game_state,
         game_needs_tweaks,
         tweaks_needs_update,
         runtime_needs_update,
+        game_needs_update,
     } = props;
 
     let ButtonTheme { font_theme, .. } = use_applied_theme!(&None, filled_button);
@@ -227,10 +237,12 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
                 game_needs_tweaks,
                 tweaks_needs_update,
                 runtime_needs_update,
+                game_needs_update,
                 missing_components: game_state.read().get_missing_components(),
                 on_setup_runtime,
                 on_setup_tweaks,
                 on_download_game,
+                on_update_game,
                 on_show_install_modal,
                 on_show_import_modal,
                 game_id: game_id.clone(),
@@ -253,10 +265,12 @@ fn ActionButton(
     game_needs_tweaks: bool,
     tweaks_needs_update: bool,
     runtime_needs_update: bool,
+    game_needs_update: bool,
     missing_components: Vec<&'static str>,
     on_setup_runtime: Option<EventHandler<PressEvent>>,
     on_setup_tweaks: Option<EventHandler<PressEvent>>,
     on_download_game: Option<EventHandler<PressEvent>>,
+    on_update_game: Option<EventHandler<PressEvent>>,
     on_show_install_modal: Option<EventHandler<()>>,
     on_show_import_modal: Option<EventHandler<()>>,
     game_id: String,
@@ -275,6 +289,8 @@ fn ActionButton(
     if runtime_busy || tweaks_busy || game_busy {
         return rsx! {};
     }
+
+    let should_show_update = installed && game_needs_update;
 
     let label = if game_running {
         "Kill Game".to_string()
@@ -302,6 +318,8 @@ fn ActionButton(
         "Update Tweaks".to_string()
     } else if !installed {
         "Download Game".to_string()
+    } else if should_show_update {
+        "Update Game".to_string()
     } else {
         "Start Game".to_string()
     };
@@ -378,6 +396,14 @@ fn ActionButton(
             if let Some(handler) = on_show_install_modal {
                 handler.call(());
             }
+        } else if should_show_update {
+            // Update game
+            eprintln!("[ActionButton] Calling update game handler");
+            if let Some(handler) = on_update_game {
+                handler.call(evt);
+            } else {
+                eprintln!("[ActionButton] No game update handler available");
+            }
         } else {
             // Download or start game
             eprintln!("[ActionButton] Calling download/start game handler");
@@ -416,7 +442,7 @@ fn ActionButton(
             }
 
             // DirectX11 checkbox - only show when game is installed and ready to launch
-            if runtime_ready && (!game_needs_tweaks || tweaks_ready) && installed && !game_running {
+            if runtime_ready && (!game_needs_tweaks || tweaks_ready) && installed && !game_running && !game_needs_update {
                 DirectX11Checkbox {
                     game_id: game_id.clone(),
                     settings,

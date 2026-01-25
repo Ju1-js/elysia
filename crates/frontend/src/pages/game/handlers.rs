@@ -255,12 +255,17 @@ pub fn create_component_setup_handler(
                     
                     if !state_signal.read().component_setup.wine_ready {
                         debug!("Downloading Wine...");
+                        
+                        // Convert "auto" or empty to None for latest version
+                        let wine_version_to_download = configured_wine_version.as_deref()
+                            .filter(|v| !v.is_empty() && *v != "auto");
+                        
                         let wine_result = {
                             let component_manager = manager_arc.read().await;
                             backend::runners::Runners::download_wine(
                                 &settings_data,
                                 &component_manager,
-                                configured_wine_version.as_deref(),
+                                wine_version_to_download,
                                 Some(&tracker),
                                 "runtime_setup",
                             )
@@ -278,13 +283,13 @@ pub fn create_component_setup_handler(
                                         backend::runners::Runners::Wine(backend::runners::Wine {
                                             version: downloaded_version.clone(),
                                         });
-                                    if let Err(e) = settings_guard.save() {
-                                        debug_error!("Failed to save settings after Wine download: {}", e);
+                                    if let Err(_e) = settings_guard.save() {
+                                        debug_error!("Failed to save settings after Wine download");
                                     }
                                 }
                             }
-                            Err(e) => {
-                                debug_error!("Failed to download Wine: {}", e);
+                            Err(_e) => {
+                                debug_error!("Failed to download Wine");
                                 tracker.clear("runtime_setup");
                                 state_signal.write().set_runtime_active(false);
                                 return;
@@ -319,13 +324,13 @@ pub fn create_component_setup_handler(
                                     components.retain(|c| !matches!(c, backend::settings::RuntimeComponents::Dxvk(_)));
                                     components.push(backend::settings::RuntimeComponents::Dxvk(downloaded_version.clone()));
                                     settings_guard.default_preferences.runtime_components = components;
-                                    if let Err(e) = settings_guard.save() {
-                                        debug_error!("Failed to save settings after DXVK download: {}", e);
+                                    if let Err(_e) = settings_guard.save() {
+                                        debug_error!("Failed to save settings after DXVK download");
                                     }
                                 }
                             }
-                            Err(e) => {
-                                debug_error!("Failed to download DXVK: {}", e);
+                            Err(_e) => {
+                                debug_error!("Failed to download DXVK");
                                 tracker.clear("runtime_setup");
                                 state_signal.write().set_runtime_active(false);
                                 return;
@@ -384,13 +389,10 @@ pub fn create_component_setup_handler(
                                 state_signal.write().set_umu_ready(umu_now);
                                 state_signal.write().set_steamrt_ready(steamrt_now);
                                 state_signal.write().set_proton_ready(proton_now);
-                                
-                                if !proton_now {
-                                    debug!("Runtime dependencies installed.");
-                                }
+                                debug!("Runtime dependencies (UMU/SteamRT) installed successfully");
                             }
-                            Err(ref e) => {
-                                debug_error!("Failed to download UMU/SteamRT: {}", e);
+                            Err(ref _e) => {
+                                debug_error!("Failed to download UMU/SteamRT");
                                 tracker.clear("runtime_setup");
                                 state_signal.write().set_runtime_active(false);
                                 return;
@@ -402,12 +404,16 @@ pub fn create_component_setup_handler(
                         state_signal.write().set_umu_ready(true);
                         state_signal.write().set_steamrt_ready(true);
                         
+                        // Convert "auto" or empty to None for latest version
+                        let proton_version_to_download = configured_proton_version.as_deref()
+                            .filter(|v| !v.is_empty() && *v != "auto");
+                        
                         let proton_result = {
                             let mut component_manager = manager_arc.write().await;
                             backend::runners::Runners::download_proton(
                                 &settings_data,
                                 &mut component_manager,
-                                configured_proton_version.as_deref(),
+                                proton_version_to_download,
                                 Some(&tracker),
                                 "runtime_setup",
                             )
@@ -425,13 +431,13 @@ pub fn create_component_setup_handler(
                                         backend::runners::Runners::Proton(backend::runners::Proton {
                                             version: downloaded_version.clone(),
                                         });
-                                    if let Err(e) = settings_guard.save() {
-                                        debug_error!("Failed to save settings after Proton download: {}", e);
+                                    if let Err(_e) = settings_guard.save() {
+                                        debug_error!("Failed to save settings after Proton download");
                                     }
                                 }
                             }
-                            Err(e) => {
-                                debug_error!("Failed to download Proton: {}", e);
+                            Err(_e) => {
+                                debug_error!("Failed to download Proton");
                                 tracker.clear("runtime_setup");
                                 state_signal.write().set_runtime_active(false);
                                 return;
@@ -529,8 +535,8 @@ pub fn create_tweaks_setup_handler(
                     .await
             };
 
-            if let Err(e) = refresh_result {
-                debug_error!("Failed to refresh Jadeite: {}", e);
+            if let Err(_e) = refresh_result {
+                debug_error!("Failed to refresh Jadeite");
                 state_signal.write().set_tweaks_active(&game_id_clone, false);
                 tracker.clear("tweaks_setup");
                 return;
@@ -569,8 +575,8 @@ pub fn create_tweaks_setup_handler(
                         component_manager.cleanup_old_versions(&settings_data, ComponentType::Jadeite)
                     };
                     
-                    if let Err(e) = cleanup_result {
-                        debug_error!("Failed to cleanup old Jadeite versions: {}", e);
+                    if let Err(_e) = cleanup_result {
+                        debug_error!("Failed to cleanup old Jadeite versions");
                     }
 
                     // Clone settings data before await to avoid holding lock
@@ -581,8 +587,8 @@ pub fn create_tweaks_setup_handler(
                         system_status.set(Some(new_status));
                     }
                 }
-                Err(e) => {
-                    debug_error!("Failed to download Jadeite: {}", e);
+                Err(_e) => {
+                    debug_error!("Failed to download Jadeite");
                 }
             }
 

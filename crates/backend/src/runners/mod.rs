@@ -257,7 +257,7 @@ impl Runners {
                         .find(|v| v.version == requested_version)
                         .map(|v| v.display_name.clone())
                 })
-                .unwrap_or_else(|| format!("Proton {}", requested_version))
+                .unwrap_or_else(|| format!("Proton {requested_version}"))
         } else {
             // If no version specified, use latest
             component_manager
@@ -320,7 +320,7 @@ impl Runners {
                         .find(|v| v.version == requested_version)
                         .map(|v| v.display_name.clone())
                 })
-                .unwrap_or_else(|| format!("Wine {}", requested_version))
+                .unwrap_or_else(|| format!("Wine {requested_version}"))
         } else {
             // If no version specified, use latest
             component_manager
@@ -383,7 +383,7 @@ impl Runners {
                         .find(|v| v.version == requested_version)
                         .map(|v| v.display_name.clone())
                 })
-                .unwrap_or_else(|| format!("DXVK {}", requested_version))
+                .unwrap_or_else(|| format!("DXVK {requested_version}"))
         } else {
             // If no version specified, use latest
             component_manager

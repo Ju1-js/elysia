@@ -17,19 +17,33 @@ type DownloadProgressGetter = Rc<dyn Fn(&str) -> Option<DownloadProgress>>;
 /// Create a progress getter for game download progress tracking
 pub fn create_progress_getter(
     settings: Signal<Arc<RwLock<GlobalSettings>>>,
-    game_id: String,
-    biz: String,
+    game_id: &str,
+    biz: &str,
 ) -> (
     String,
     DownloadProgressGetter,
 ) {
     let key = format!("{game_id}_streaming");
+    let game_id_for_getter = game_id.to_string();
+    let biz_for_getter = biz.to_string();
+    
     let getter = std::rc::Rc::new(move |progress_key: &str| {
+        if biz_for_getter == "endfield"
+            && let Some(progress) = backend::game_providers::endfield::get_progress(progress_key) {
+                return Some(DownloadProgress {
+                    downloaded: progress.downloaded,
+                    total: progress.total,
+                    speed_mb_s: f64::from(progress.mb_s),
+                    status: progress.status,
+                    is_busy: progress.is_busy,
+                });
+            }
+        
         let settings_guard = settings.read();
         let settings_data = settings_guard.read().ok()?;
         let installer = InstallerManager::create_installer(
-            &game_id,
-            &biz,
+            &game_id_for_getter,
+            &biz_for_getter,
             settings_data.temp_directory.clone(),
             settings_data.games_directory.clone(),
         )?;
@@ -276,6 +290,103 @@ pub fn create_game_download_handler(
             state_signal
                 .write()
                 .set_download_active(&game_id_clone, false);
+        });
+    })
+}
+
+/// Create an event handler for game updates
+pub fn create_game_update_handler(
+    settings: Signal<Arc<RwLock<GlobalSettings>>>,
+    game_id: String,
+    biz: String,
+    game_state: GlobalGameStateSignal,
+) -> EventHandler<PressEvent> {
+    EventHandler::new(move |_| {
+        let game_id = game_id.clone();
+        let biz = biz.clone();
+        
+        // Check if already updating
+        {
+            let state = game_state.read();
+            if state.downloads.get(&game_id).is_some_and(|d| d.update_active) {
+                eprintln!("[Game Update] Update already in progress for {game_id}, ignoring duplicate click");
+                return;
+            }
+        }
+        
+        let settings_arc = settings.read().clone();
+        let mut state_signal = game_state;
+        
+        spawn_forever(async move {
+            eprintln!("[Game Update] Starting update for {game_id}");
+            
+            // Set both update_active (for button state) and active (for progress polling)
+            state_signal.write().set_game_update_active(&game_id, true);
+            state_signal.write().set_download_active(&game_id, true);
+            
+            let (install_path, temp_dir) = {
+                let Ok(settings_guard) = settings_arc.read() else {
+                    eprintln!("[Game Update] Failed to acquire settings lock");
+                    state_signal.write().set_game_update_active(&game_id, false);
+                    state_signal.write().set_download_active(&game_id, false);
+                    return;
+                };
+                
+                let install_path = settings_guard
+                    .installed_games
+                    .get(&game_id)
+                    .map(|g| g.install_path.clone());
+                
+                let Some(install_path) = install_path else {
+                    eprintln!("[Game Update] Game not installed: {game_id}");
+                    state_signal.write().set_game_update_active(&game_id, false);
+                    state_signal.write().set_download_active(&game_id, false);
+                    return;
+                };
+                
+                (install_path, settings_guard.temp_directory.clone())
+            };
+            
+            // Only Endfield supports updates currently
+            if biz != "endfield" {
+                eprintln!("[Game Update] Game updates not supported for: {biz}");
+                state_signal.write().set_game_update_active(&game_id, false);
+                state_signal.write().set_download_active(&game_id, false);
+                return;
+            }
+            
+            let progress_key = format!("{game_id}_streaming");
+            let game = backend::game_providers::endfield::Game::new(&install_path);
+            let repairer = backend::game_providers::endfield::Repairer::new(game, temp_dir);
+            
+            match repairer.update(&progress_key).await {
+                Ok(()) => {
+                    eprintln!("[Game Update] Update completed successfully for {game_id}");
+                    
+                    // Clear update state
+                    state_signal.write().set_game_update_active(&game_id, false);
+                    state_signal.write().set_download_active(&game_id, false);
+                    state_signal.write().set_game_update_available(&game_id, false);
+                    state_signal.write().set_download_progress(&game_id, None);
+                    
+                    // Update version info
+                    if let Ok(new_version) = backend::game_providers::endfield::Game::new(&install_path).get_version() {
+                        state_signal.write().set_game_versions(
+                            &game_id,
+                            Some(new_version),
+                            None,
+                        );
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[Game Update] Update failed: {e}");
+                    
+                    // Clear update state
+                    state_signal.write().set_game_update_active(&game_id, false);
+                    state_signal.write().set_download_active(&game_id, false);
+                    state_signal.write().set_download_progress(&game_id, None);
+                }
+            }
         });
     })
 }

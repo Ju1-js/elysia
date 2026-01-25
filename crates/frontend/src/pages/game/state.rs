@@ -5,12 +5,7 @@ use freya::prelude::*;
 use std::collections::HashMap;
 
 /// State tracking for game download and update status.
-///
-/// This struct tracks the complete lifecycle of a game's installation and update state:
-/// - Initial download and installation
-/// - Update availability and version tracking
-/// - Active download/update progress
-
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Debug, Default)]
 pub struct GameDownloadState {
     pub active: bool,
@@ -22,6 +17,7 @@ pub struct GameDownloadState {
     pub current_version: Option<String>,
     #[allow(dead_code)]
     pub update_version: Option<String>,
+    pub update_active: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -93,9 +89,9 @@ pub struct GlobalGameState {
     pub runtime_setup_active: bool,
     pub game_running: bool,
     pub game_child_pid: Option<u32>,
-    pub runner_path: Option<String>,    // Path to wine/proton directory
-    pub wine_prefix: Option<String>,    // WINEPREFIX path
-    pub game_start_time: Option<std::time::Instant>,  // When the game started
+    pub runner_path: Option<String>,
+    pub wine_prefix: Option<String>,
+    pub game_start_time: Option<std::time::Instant>,
 }
 
 impl GlobalGameState {
@@ -167,6 +163,18 @@ impl GlobalGameState {
         self.downloads
             .get(game_id)
             .is_some_and(|state| state.update_available)
+    }
+
+    /// Sets whether an update is actively being downloaded for the specified game.
+    ///
+    /// Called when the user initiates a game update to track the update state separately
+    /// from the initial installation state.
+    #[allow(dead_code)]
+    pub fn set_game_update_active(&mut self, game_id: &str, update_active: bool) {
+        self.downloads
+            .entry(game_id.to_string())
+            .or_default()
+            .update_active = update_active;
     }
 
     // Component setup methods
@@ -287,7 +295,6 @@ impl GlobalGameState {
     }
 
     pub fn kill_game(&mut self) -> Result<(), String> {
-        // Try wineserver -k if we have runner info
         if let (Some(runner_path), Some(wine_prefix)) = (&self.runner_path, &self.wine_prefix) {
             eprintln!("[GameState] Attempting to kill via wineserver");
             

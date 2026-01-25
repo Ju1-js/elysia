@@ -1,5 +1,5 @@
-use crate::game_providers::Progress;
 use crate::game_providers::installer::GameInstaller;
+use crate::game_providers::Progress;
 use crate::settings::InstalledGame;
 use async_trait::async_trait;
 use serde_json::json;
@@ -14,7 +14,7 @@ pub struct EndfieldInstaller {
 }
 
 impl EndfieldInstaller {
-    #[must_use] 
+    #[must_use]
     pub fn new(game_id: String, temp_dir: PathBuf, games_dir: PathBuf, biz_name: String) -> Self {
         Self {
             appcode: game_id.clone(),
@@ -36,8 +36,8 @@ impl GameInstaller for EndfieldInstaller {
         super::clear_progress(&self.progress_key());
     }
 
-    fn get_progress(&self, key: &str) -> Option<crate::game_providers::Progress> {
-        super::get_progress(key).map(|p| crate::game_providers::Progress {
+    fn get_progress(&self, key: &str) -> Option<Progress> {
+        super::get_progress(key).map(|p| Progress {
             downloaded: p.downloaded,
             total: p.total,
             mb_s: p.mb_s,
@@ -76,21 +76,38 @@ impl GameInstaller for EndfieldInstaller {
             .await
             .map_err(|e| format!("batch proxy error: {e}"))?;
 
+        let typed: super::api::BatchProxyResponse = serde_json::from_value(v.clone())
+            .map_err(|e| format!("Failed to deserialize: {e}"))?;
+
+        // Extract version string for .version file
+        let version_string = typed
+            .proxy_rsps
+            .iter()
+            .find_map(|p| p.get_latest_game_rsp.as_ref())
+            .and_then(|r| r.version.clone());
+
         let appcode = self.appcode.clone();
         let games_dir = self.games_dir.clone();
         let temp_dir = self.temp_dir.clone();
 
         let dest = tokio::task::spawn_blocking(move || {
-            tokio::runtime::Handle::current().block_on(super::install_from_batch_body_value(
+            tokio::runtime::Handle::current().block_on(super::download::install_from_batch_body_value(
                 v,
                 &appcode,
-                games_dir.as_path(),
-                temp_dir.as_path(),
+                &games_dir,
+                &temp_dir,
             ))
         })
         .await
         .map_err(|e| format!("Task error: {e}"))?
         .map_err(|e| format!("Install error: {e}"))?;
+
+        // Write .version file as plain text for future version checks
+        if let Some(version_str) = version_string {
+            std::fs::write(dest.join(".version"), &version_str)
+                .map_err(|e| format!("Failed to write .version file: {e}"))?;
+            eprintln!("[INFO] Installed version: {version_str}");
+        }
 
         println!("Endfield game installed at: {}", dest.display());
         self.clear_progress();

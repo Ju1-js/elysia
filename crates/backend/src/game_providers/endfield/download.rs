@@ -28,6 +28,16 @@ pub struct Progress {
     pub is_busy: bool,
 }
 
+impl From<api::PatchPack> for api::Pack {
+    fn from(patch: api::PatchPack) -> Self {
+        Self {
+            url: patch.url,
+            md5: patch.md5,
+            package_size: patch.package_size,
+        }
+    }
+}
+
 lazy_static! {
     static ref PROGRESS_MAP: Mutex<HashMap<String, Progress>> = Mutex::new(HashMap::new());
 }
@@ -582,4 +592,71 @@ pub async fn download_and_extract_streaming(
     }
 
     res.map_err(|e| format!("download/extraction error: {e}"))
+}
+
+/// Helper for installation from batch response
+pub async fn install_from_batch_body_value(
+    resp_json: serde_json::Value,
+    game_name: &str,
+    games_dir: &Path,
+    temp_dir: &Path,
+) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(games_dir)
+        .map_err(|e| format!("Failed to create games directory: {e}"))?;
+
+    std::fs::create_dir_all(temp_dir)
+        .map_err(|e| format!("Failed to create temp directory: {e}"))?;
+
+    let typed: api::BatchProxyResponse = match serde_json::from_value(resp_json) {
+        Ok(t) => t,
+        Err(e) => {
+            let key = format!("{game_name}_streaming");
+            set_progress(
+                &key,
+                Progress {
+                    downloaded: 0,
+                    total: 0,
+                    part_index: 0,
+                    parts_total: 0,
+                    status: format!("Error: Failed to deserialize batch response: {e}"),
+                    mb_s: 0.0,
+                    is_busy: false,
+                },
+            );
+            return Err(format!("Failed to deserialize batch response: {e}"));
+        }
+    };
+
+    for proxy in typed.proxy_rsps {
+        if let Some(get_latest) = proxy.get_latest_game_rsp
+            && let Some(pkg) = get_latest.pkg
+        {
+            let packs: Vec<api::Pack> = pkg
+                .packs
+                .into_iter()
+                .filter(|p| !p.url.is_empty())
+                .collect();
+
+            if packs.is_empty() {
+                return Err("No pack URLs found in batch response".to_string());
+            }
+
+            let progress_key = format!("{game_name}_streaming");
+            let dest = games_dir.join("endfield");
+
+            eprintln!("[INFO] Starting streaming download & extraction");
+            eprintln!("[INFO]   Parts: {}", packs.len());
+            eprintln!("[INFO]   Destination: {}", dest.display());
+
+            std::fs::create_dir_all(&dest)
+                .map_err(|e| format!("Failed to create game directory: {e}"))?;
+
+            download_and_extract_streaming(packs, &dest, &progress_key, game_name).await?;
+
+            eprintln!("[INFO] Installation complete: {}", dest.display());
+            return Ok(dest);
+        }
+    }
+
+    Err("No get_latest_game response with package info found".to_string())
 }

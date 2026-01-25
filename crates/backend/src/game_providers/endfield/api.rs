@@ -22,13 +22,17 @@ pub struct ProxyRsp {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetLatestGameRsp {
+    #[serde(default)]
     pub action: Option<i32>,
+    #[serde(default)]
     pub version: Option<String>,
     #[serde(default)]
     pub request_version: Option<String>,
+    #[serde(default)]
     pub pkg: Option<Pkg>,
     #[serde(default)]
-    pub patch: Option<serde_json::Value>,
+    pub patch: Option<Patch>,
+    #[serde(default)]
     pub state: Option<i32>,
     #[serde(default)]
     pub launcher_action: Option<i32>,
@@ -57,6 +61,31 @@ pub struct Pkg {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pack {
+    pub url: String,
+    #[serde(default)]
+    pub md5: Option<String>,
+    #[serde(default)]
+    pub package_size: Option<String>,
+}
+
+// New patch structures
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Patch {
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub md5: Option<String>,
+    #[serde(default)]
+    pub package_size: Option<String>,
+    #[serde(default)]
+    pub total_size: Option<String>,
+    #[serde(default)]
+    pub file_id: Option<String>,
+    pub patches: Vec<PatchPack>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PatchPack {
     pub url: String,
     #[serde(default)]
     pub md5: Option<String>,

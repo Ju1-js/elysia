@@ -339,7 +339,7 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
     let progress_tracker_instance = progress_tracker();
 
     let (game_progress_key, get_progress) =
-        helpers::create_progress_getter(settings, game_data.id.clone(), game_data.biz.clone());
+        helpers::create_progress_getter(settings, &game_data.id, &game_data.biz);
 
     let get_runtime_progress =
         handlers::create_runtime_progress_getter(progress_tracker_instance.clone());
@@ -399,6 +399,69 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
         }
     }));
 
+    let game_id_for_update_check = game_data.id.clone();
+    let game_biz_for_update_check = game_data.biz.clone();
+    use_effect(use_reactive!(|game_id_for_update_check, game_biz_for_update_check| {
+        let settings_arc = settings.read().clone();
+        let mut game_state_clone = game_state;
+        
+        spawn(async move {
+            // Only check for Endfield
+            if game_biz_for_update_check != "endfield" {
+                return;
+            }
+            
+            let install_path = {
+                let Ok(settings_guard) = settings_arc.read() else {
+                    return;
+                };
+                
+                let install_path = settings_guard
+                    .installed_games
+                    .get(&game_id_for_update_check)
+                    .map(|g| g.install_path.clone());
+                
+                let Some(install_path) = install_path else {
+                    return;
+                };
+                
+                install_path
+            };
+            
+            let game = backend::game_providers::endfield::Game::new(&install_path);
+            
+            if !game.is_installed() {
+                return;
+            }
+            
+            match game.get_version() {
+                Ok(current_version) => {
+                    match backend::game_providers::endfield::Game::get_latest_version().await {
+                        Ok(latest_version) => {
+                            if current_version == latest_version {
+                                game_state_clone.write().set_game_update_available(&game_id_for_update_check, false);
+                            } else {
+                                eprintln!("[Update Check] Update available: {current_version} -> {latest_version}");
+                                game_state_clone.write().set_game_update_available(&game_id_for_update_check, true);
+                                game_state_clone.write().set_game_versions(
+                                    &game_id_for_update_check,
+                                    Some(current_version),
+                                    Some(latest_version),
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("[Update Check] Failed to check for updates: {e}");
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[Update Check] Failed to get current version: {e}");
+                }
+            }
+        });
+    }));
+
     // Clone values needed by multiple memoized closures
     let progress_tracker_for_runtime = progress_tracker_instance.clone();
     let progress_tracker_for_tweaks = progress_tracker_instance.clone();
@@ -440,6 +503,18 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
         )
     }));
 
+    let game_id_for_update = game_data.id.clone();
+    let game_biz_for_update = game_data.biz.clone();
+
+    let on_update_game = use_memo(use_reactive!(|game_id_for_update, game_biz_for_update| {
+        helpers::create_game_update_handler(
+            settings,
+            game_id_for_update.clone(),
+            game_biz_for_update.clone(),
+            game_state,
+        )
+    }));
+
     // fixme: not only jadeite
     let game_needs_tweaks = tweak_manifest.read().needs_jadeite(&game_data.id);
     
@@ -452,6 +527,8 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
         .read()
         .as_ref()
         .is_some_and(backend::status::SystemStatus::runtime_needs_update);
+
+    let game_needs_update = game_state.read().needs_update(&game_data.id);
 
     let settings_scale = if show_settings() {
         if settings_scale_anim.is_running() {
@@ -577,12 +654,14 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
                                 on_setup_runtime: *on_setup_runtime.read(),
                                 on_setup_tweaks: *on_setup_tweaks.read(),
                                 on_download_game: *on_download_game.read(),
+                                on_update_game: *on_update_game.read(),
                                 on_show_install_modal: move |()| show_install_modal.set(true),
                                 on_show_import_modal: move |()| show_import_modal.set(true),
                                 game_state,
                                 game_needs_tweaks,
                                 tweaks_needs_update,
                                 runtime_needs_update,
+                                game_needs_update,
                             }
                         }
                     }
@@ -737,6 +816,56 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
                                         eprintln!("[GameContent] Successfully imported game from: {}", import_path_outer.display());
                                         game_state_clone.write().set_download_installed(&game_id_outer, true);
                                         show_import_modal_clone.set(false);
+                                        
+                                        // Check for updates after import
+                                        if game_biz == "endfield" {
+                                            let install_path = {
+                                                let Ok(settings_guard) = settings_arc.read() else {
+                                                    return;
+                                                };
+                                                
+                                                let install_path = settings_guard
+                                                    .installed_games
+                                                    .get(&game_id_outer)
+                                                    .map(|g| g.install_path.clone());
+                                                
+                                                let Some(install_path) = install_path else {
+                                                    return;
+                                                };
+                                                
+                                                install_path
+                                            };
+                                            
+                                            let game = backend::game_providers::endfield::Game::new(&install_path);
+                                            
+                                            if !game.is_installed() {
+                                                return;
+                                            }
+                                            
+                                            match game.get_version() {
+                                                Ok(current_version) => {
+                                                    match backend::game_providers::endfield::Game::get_latest_version().await {
+                                                        Ok(latest_version) => {
+                                                            if current_version != latest_version {
+                                                                eprintln!("[Import] Update available: {current_version} -> {latest_version}");
+                                                                game_state_clone.write().set_game_update_available(&game_id_outer, true);
+                                                                game_state_clone.write().set_game_versions(
+                                                                    &game_id_outer,
+                                                                    Some(current_version),
+                                                                    Some(latest_version),
+                                                                );
+                                                            }
+                                                        }
+                                                        Err(e) => {
+                                                            eprintln!("[Import] Failed to check for updates: {e}");
+                                                        }
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    eprintln!("[Import] Failed to get current version: {e}");
+                                                }
+                                            }
+                                        }
                                     }
                                     Err(e) => {
                                         eprintln!("[GameContent] Failed to import game: {e}");

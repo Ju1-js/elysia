@@ -1,15 +1,18 @@
 pub mod api;
 mod download;
+mod game;
 mod installer;
-mod proto;
+mod repairer;
 
 pub use download::{Progress, clear_progress, get_progress, set_progress};
+pub use game::Game;
 pub use installer::EndfieldInstaller;
+pub use repairer::Repairer;
 
 use crate::game_providers::hoyoplay::proto::{
-    Background, Banner, Content, Display, Game, GameBasicInfo, GameIdentifier, GameInfo,
-    GetGameContent, GetGames, IconAsset, Image, ImageLink, MediaAsset, Post, SocialMedia,
-    VideoAsset,
+    Background, Banner, Content, Display, Game as ProtoGame, GameBasicInfo, GameIdentifier,
+    GameInfo, GetGameContent, GetGames, IconAsset, Image, ImageLink, MediaAsset, Post,
+    SocialMedia, VideoAsset,
 };
 use api::BatchProxyResponse;
 use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
@@ -74,124 +77,6 @@ pub async fn batch_proxy_web_post(body: &Value) -> Result<Value, String> {
 
     let json: Value = resp.json().await.map_err(|e| format!("parse json: {e}"))?;
     Ok(json)
-}
-
-/// # Errors
-/// Returns an error if the file cannot be read or parsed.
-#[allow(dead_code)]
-pub async fn batch_proxy_post_from_file(path: &Path) -> Result<Value, String> {
-    let data = std::fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read batch json {}: {e}", path.display()))?;
-    let v: Value = serde_json::from_str(&data).map_err(|e| format!("Invalid json file: {e}"))?;
-    batch_proxy_post(&v).await
-}
-
-/// # Errors
-/// Returns an error if installation fails.
-pub async fn install_from_batch_body_value(
-    resp_json: Value,
-    game_name: &str,
-    games_dir: &Path,
-    temp_dir: &Path,
-) -> Result<PathBuf, String> {
-    std::fs::create_dir_all(games_dir)
-        .map_err(|e| format!("Failed to create games directory: {e}"))?;
-
-    std::fs::create_dir_all(temp_dir)
-        .map_err(|e| format!("Failed to create temp directory: {e}"))?;
-
-    let typed: BatchProxyResponse = match serde_json::from_value(resp_json) {
-        Ok(t) => t,
-        Err(e) => {
-            let key = format!("{game_name}_streaming");
-            download::set_progress(
-                &key,
-                download::Progress {
-                    downloaded: 0,
-                    total: 0,
-                    part_index: 0,
-                    parts_total: 0,
-                    status: format!("Error: Failed to deserialize batch response: {e}"),
-                    mb_s: 0.0,
-                    is_busy: false,
-                },
-            );
-            return Err(format!("Failed to deserialize batch response: {e}"));
-        }
-    };
-
-    for proxy in typed.proxy_rsps {
-        if let Some(get_latest) = proxy.get_latest_game_rsp
-            && let Some(pkg) = get_latest.pkg {
-                let packs: Vec<api::Pack> = pkg
-                    .packs
-                    .into_iter()
-                    .filter(|p| !p.url.is_empty())
-                    .collect();
-
-                if packs.is_empty() {
-                    let key = format!("{game_name}_streaming");
-                    download::set_progress(
-                        &key,
-                        download::Progress {
-                            downloaded: 0,
-                            total: 0,
-                            part_index: 0,
-                            parts_total: 0,
-                            status: "Error: No pack URLs found in batch response".to_string(),
-                            mb_s: 0.0,
-                            is_busy: false,
-                        },
-                    );
-                    return Err("No pack URLs found in batch response".to_string());
-                }
-
-                let progress_key = format!("{game_name}_streaming");
-                let dest = games_dir.join("endfield");
-
-                eprintln!("[INFO] Starting streaming download & extraction");
-                eprintln!("[INFO]   Parts: {}", packs.len());
-                eprintln!("[INFO]   Destination: {}", dest.display());
-                eprintln!("[INFO]   Temp directory: {}", temp_dir.display());
-
-                std::fs::create_dir_all(&dest)
-                    .map_err(|e| format!("Failed to create game directory: {e}"))?;
-
-                download::set_progress(
-                    &progress_key,
-                    download::Progress {
-                        downloaded: 0,
-                        total: 0,
-                        part_index: 0,
-                        parts_total: packs.len(),
-                        status: "Preparing download...".to_string(),
-                        mb_s: 0.0,
-                        is_busy: true,
-                    },
-                );
-
-                download::download_and_extract_streaming(packs, &dest, &progress_key, game_name)
-                    .await?;
-
-                eprintln!("[INFO] Installation complete: {}", dest.display());
-                return Ok(dest);
-            }
-    }
-
-    let key = format!("{game_name}_streaming");
-    download::set_progress(
-        &key,
-        download::Progress {
-            downloaded: 0,
-            total: 0,
-            part_index: 0,
-            parts_total: 0,
-            status: "Error: No get_latest_game response with package info found".to_string(),
-            mb_s: 0.0,
-            is_busy: false,
-        },
-    );
-    Err("No get_latest_game response with package info found".to_string())
 }
 
 /// # Errors
@@ -296,7 +181,7 @@ pub async fn get_games() -> Result<GetGames, String> {
         wpf_icon: None,
     };
 
-    let game = Game {
+    let game = ProtoGame {
         id: APP_CODE.to_string(),
         biz: "endfield".to_string(),
         display,
