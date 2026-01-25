@@ -138,8 +138,8 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
 
     // Convert memos to signals for polling functions
     let runtime_active_signal = runtime_active;
-    let mut tweaks_active_signal = use_signal(move || *tweaks_active.read());
-    let mut is_downloading_signal = use_signal(move || *is_downloading.read());
+    let mut tweaks_active_signal = use_signal(|| *tweaks_active.read());
+    let mut is_downloading_signal = use_signal(|| *is_downloading.read());
 
     use_effect(use_reactive!(|tweaks_active| {
         tweaks_active_signal.set(*tweaks_active.read());
@@ -149,7 +149,7 @@ pub fn DownloadControl(props: DownloadControlProps) -> Element {
         is_downloading_signal.set(*is_downloading.read());
     }));
 
-    // Poll for progress - runtime polls unconditionally now
+    // Poll for progress
     poll_runtime_setup(
         runtime_active_signal,
         "runtime_setup",
@@ -276,14 +276,23 @@ fn ActionButton(
         return rsx! {};
     }
 
-    // Determine button LABEL based on current state
     let label = if game_running {
         "Kill Game".to_string()
     } else if !runtime_ready {
         if missing_components.is_empty() {
             "Download Runtime Setup".to_string()
         } else {
-            format!("Download {}", missing_components.join(" & "))
+            let has_proton = missing_components.contains(&"Proton");
+            let has_umu = missing_components.contains(&"UMU");
+            let has_steamrt = missing_components.contains(&"Steam Runtime");
+            
+            if has_umu || has_steamrt {
+                "Download Proton Runtime".to_string()
+            } else if has_proton {
+                "Download Proton".to_string()
+            } else {
+                format!("Download {}", missing_components.join(" & "))
+            }
         }
     } else if runtime_ready && runtime_needs_update {
         "Update Runtime".to_string()
@@ -297,7 +306,6 @@ fn ActionButton(
         "Start Game".to_string()
     };
 
-    // Create ONE dynamic handler that checks state when clicked
     let dynamic_handler = EventHandler::new(move |evt| {
         let mut state = game_state;
         let is_running = state.read().is_game_running();
@@ -465,7 +473,6 @@ fn SetupWidget(
     accent: String,
     font: FontTheme,
 ) -> Element {
-    // Top label shows generic step description (e.g., "Downloading Wine")
     let generic_step = setup.current_step.description();
 
     // Format step counter
@@ -654,9 +661,9 @@ pub fn InstallDirectoryModal(
     let default_path = {
         let settings_guard = settings.read();
         if let Ok(s) = settings_guard.read() {
-            s.games_directory.join(&game_name).display().to_string()
+            s.games_directory.join(&game_biz).display().to_string()
         } else {
-            format!("~/.local/share/elysia/games/{game_name}")
+            format!("~/.local/share/elysia/games/{game_biz}")
         }
     };
 
@@ -960,6 +967,7 @@ pub fn ImportGameModal(
             backdrop_blur: "8",
             main_align: "center",
             cross_align: "center",
+            layer: "-3",
             onclick: move |_| on_close.call(()),
 
             // Modal content
@@ -1134,9 +1142,8 @@ fn DirectX11Checkbox(
         if let Ok(s) = settings_guard.read() {
             s.game_preferences
                 .get(&game_id)
-                .map(|prefs| prefs.use_directx11)
-                .or_else(|| s.installed_games.get(&game_id).map(|game| game.use_directx11))
-                .unwrap_or(false)
+                .and_then(|prefs| prefs.use_directx11)
+                .unwrap_or_else(|| s.default_preferences.use_directx11)
         } else {
             false
         }
@@ -1154,7 +1161,7 @@ fn DirectX11Checkbox(
             let prefs = settings_guard.game_preferences
                 .entry(game_id.clone())
                 .or_insert_with(backend::settings::GamePreferences::default);
-            prefs.use_directx11 = new_value;
+            prefs.use_directx11 = Some(new_value);
 
             // Update installed game if it exists
             if let Some(game) = settings_guard.installed_games.get_mut(&game_id) {

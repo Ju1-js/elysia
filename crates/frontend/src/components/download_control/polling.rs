@@ -14,13 +14,18 @@ pub fn poll_runtime_setup(
 ) {
     let key = key.to_string();
 
-    use_effect(move || {
+    // Use use_effect with empty dependencies to run only once on mount
+    use_effect(use_reactive!(|| {
         let key = key.clone();
         let get_progress = get_progress.clone();
 
+        eprintln!("[poll_runtime_setup] Starting polling loop for key: {key}");
         spawn(async move {
+            eprintln!("[poll_runtime_setup] Inside spawn, starting loop for key: {key}");
             loop {
                 if let Some(p) = get_progress(&key) {
+                    eprintln!("[poll_runtime_setup] Got progress for key {}: step={:?}, step_progress={:?}", 
+                        key, p.current_step, p.step_progress);
                     progress.set(Some(p));
                 } else if progress.read().is_some() {
                     // Clear progress display when download completes
@@ -28,12 +33,14 @@ pub fn poll_runtime_setup(
                     game_state.write().set_runtime_active(false);
                     debug!("Runtime setup progress cleared, set runtime_active=false");
                     progress.set(None);
+                    eprintln!("[poll_runtime_setup] Download complete, cleared progress for key: {key}");
+                    // Don't break - keep polling in case a new download starts
                 }
 
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
         });
-    });
+    }));
 }
 
 /// Poll for tweaks setup progress continuously
@@ -47,7 +54,8 @@ pub fn poll_tweaks_setup(
 ) {
     let key = key.to_string();
 
-    use_effect(move || {
+    // Use use_effect with empty dependencies to run only once on mount
+    use_effect(use_reactive!(|| {
         let key = key.clone();
         let game_id = game_id.clone();
         let get_progress = get_progress.clone();
@@ -61,12 +69,13 @@ pub fn poll_tweaks_setup(
                     // Note: The handler is responsible for setting tweaks_ready state
                     game_state.write().set_tweaks_active(&game_id, false);
                     progress.set(None);
+                    // Don't break - keep polling in case a new download starts
                 }
 
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
         });
-    });
+    }));
 }
 type DownloadProgressGetter = Rc<dyn Fn(&str) -> Option<DownloadProgress>>;
 

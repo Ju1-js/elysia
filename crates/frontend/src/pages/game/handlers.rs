@@ -114,13 +114,28 @@ pub fn create_component_setup_handler(
     mut system_status: Signal<Option<SystemStatus>>,
     game_state: GlobalGameStateSignal,
     component_service: Signal<Option<crate::services::ComponentService>>,
+    game_id: String,
 ) -> EventHandler<PressEvent> {
     debug!("Creating component setup handler");
     EventHandler::new(move |_| {
         debug!("Component setup handler called");
+        
+        let mut state_signal = game_state;
+        
+        // Atomically check and set the active flag
+        {
+            let mut state = state_signal.write();
+            if state.is_runtime_setup_active() {
+                debug!("Runtime setup already in progress, ignoring duplicate click");
+                return;
+            }
+            // Set active flag immediately to block other clicks
+            state.set_runtime_active(true);
+        }
+        
         let settings_arc = settings.read().clone();
         let tracker = progress_tracker.clone();
-        let mut state_signal = game_state;
+        let game_id_for_lookup = game_id.clone();
 
         let runner_type = state_signal.read().current_runner_type.clone();
         let missing = state_signal.read().get_missing_components();
@@ -133,11 +148,21 @@ pub fn create_component_setup_handler(
         let service_opt = component_service.read().clone();
         let Some(service) = service_opt else {
             debug!("ComponentService not initialized yet");
+            // Reset the flag since we're not actually starting
+            state_signal.write().set_runtime_active(false);
             return;
         };
+        
+        // Initialize progress tracker
+        tracker.report("runtime_setup", "Initializing", backend::progress::ReportParams {
+            downloaded: 0,
+            total: 100,
+            is_busy: true,
+            step_index: None,
+            total_steps: None,
+        });
 
-        spawn(async move {
-            state_signal.write().set_runtime_active(true);
+        spawn_forever(async move {
 
             let settings_data = if let Ok(s) = settings_arc.read() { s.clone() } else {
                 debug_error!("Failed to acquire settings lock");
@@ -146,17 +171,37 @@ pub fn create_component_setup_handler(
             };
 
             debug!("Re-checking component readiness...");
+            
+            let (configured_wine_version, _configured_proton_version) = {
+                let runner = settings_data.game_preferences.get(&game_id_for_lookup)
+                    .and_then(|prefs| prefs.runner.as_ref())
+                    .unwrap_or(&settings_data.default_preferences.runner);
+                
+                match runner {
+                    backend::runners::Runners::Wine(wine) => (Some(wine.version.clone()), None),
+                    backend::runners::Runners::Proton(proton) => (None, Some(proton.version.clone())),
+                    backend::runners::Runners::Native => (None, None),
+                }
+            };
+            
             match runner_type {
                 super::state::RunnerType::Wine => {
-                    let wine_installed = service
-                        .is_installed(&settings_data, backend::components::ComponentType::Wine).await;
+                    // Check if system wine is being used
+                    let wine_ready = if configured_wine_version.as_deref() == Some("system") {
+                        // System wine is always "ready" if available
+                        backend::runners::is_system_wine_available()
+                    } else {
+                        // Otherwise, check if the wine component is installed
+                        service.is_installed(&settings_data, backend::components::ComponentType::Wine).await
+                    };
+                    
                     let dxvk_installed = service
                         .is_installed(&settings_data, backend::components::ComponentType::Dxvk).await;
-                    state_signal.write().set_wine_ready(wine_installed);
+                    state_signal.write().set_wine_ready(wine_ready);
                     state_signal.write().set_dxvk_ready(dxvk_installed);
                     debug!(
-                        "Wine ready: {}, DXVK ready: {}",
-                        wine_installed, dxvk_installed
+                        "Wine ready: {} (system: {}), DXVK ready: {}",
+                        wine_ready, configured_wine_version.as_deref() == Some("system"), dxvk_installed
                     );
                 }
                 super::state::RunnerType::Proton => {
@@ -169,11 +214,13 @@ pub fn create_component_setup_handler(
                         backend::components::ComponentType::SteamRuntime,
                     ).await;
 
-                    let all_ready = proton_installed && umu_installed && steamrt_installed;
-                    state_signal.write().set_proton_ready(all_ready);
+                    state_signal.write().set_proton_ready(proton_installed);
+                    state_signal.write().set_umu_ready(umu_installed);
+                    state_signal.write().set_steamrt_ready(steamrt_installed);
+                    
                     debug!(
-                        "Proton ready: {} (proton: {}, umu: {}, steamrt: {})",
-                        all_ready, proton_installed, umu_installed, steamrt_installed
+                        "Proton ready: {}, UMU ready: {}, SteamRT ready: {}",
+                        proton_installed, umu_installed, steamrt_installed
                     );
                 }
             }
@@ -278,59 +325,66 @@ pub fn create_component_setup_handler(
                 super::state::RunnerType::Proton => {
                     debug!("Checking Proton runtime components...");
 
-                    // install_proton_runtime already checks needs_update internally,
-                    // so we call it regardless of proton_ready status to handle both
-                    // initial installation and updates
-                    let result = {
-                        let mut component_manager = manager_arc.write().await;
-                        backend::runners::Runners::download_proton_runtime(
-                            &settings_data,
-                            &mut component_manager,
-                            Some(&tracker),
-                            "runtime_setup",
-                        )
-                        .await
-                    };
-                    
-                    match result {
-                        Ok(()) => {
-                            debug!("UMU and SteamRT download completed (installed or already up to date)");
-                        }
-                        Err(ref e) => {
-                            debug_error!("Failed to download UMU/SteamRT: {}", e);
-                            tracker.clear("runtime_setup");
-                            state_signal.write().set_runtime_active(false);
-                            return;
-                        }
-                    }
-
-                    // Check if Proton is installed
+                    // Check current installation status before downloading anything
                     let proton_installed = service
                         .is_installed(&settings_data, backend::components::ComponentType::Proton).await;
-                    
-                    // Skip Proton download since already installed, but re-check all runtime component status
-                    if proton_installed {
-                        debug!("Proton already installed");
-                        
-                        // Re-check all runtime components and update state
-                        let umu_installed = service
-                            .is_installed(&settings_data, backend::components::ComponentType::Umu).await;
-                        let steamrt_installed = service.is_installed(
-                            &settings_data,
-                            backend::components::ComponentType::SteamRuntime,
-                        ).await;
-                        
-                        let all_ready = proton_installed && umu_installed && steamrt_installed;
-                        state_signal.write().set_proton_ready(all_ready);
-                        debug!(
-                            "Updated proton_ready: {} (proton: {}, umu: {}, steamrt: {})",
-                            all_ready, proton_installed, umu_installed, steamrt_installed
-                        );
-                        
-                        Ok(())
-                    } else {
-                        debug!("Downloading Proton...");
+                    let umu_installed = service
+                        .is_installed(&settings_data, backend::components::ComponentType::Umu).await;
+                    let steamrt_installed = service.is_installed(
+                        &settings_data,
+                        backend::components::ComponentType::SteamRuntime,
+                    ).await;
 
+                    debug!("Current status - proton: {}, umu: {}, steamrt: {}", 
+                        proton_installed, umu_installed, steamrt_installed);
+
+                    if !umu_installed || !steamrt_installed {
+                        debug!("Downloading runtime dependencies (UMU/SteamRT)...");
+                        let runtime_result = {
+                            let mut component_manager = manager_arc.write().await;
+                            backend::runners::Runners::download_proton_runtime(
+                                &settings_data,
+                                &mut component_manager,
+                                Some(&tracker),
+                                "runtime_setup",
+                            )
+                            .await
+                        };
+                        
+                        match runtime_result {
+                            Ok(()) => {
+                                debug!("UMU and SteamRT download completed");
+                                // Re-check installation status
+                                let umu_now = service
+                                    .is_installed(&settings_data, backend::components::ComponentType::Umu).await;
+                                let steamrt_now = service.is_installed(
+                                    &settings_data,
+                                    backend::components::ComponentType::SteamRuntime,
+                                ).await;
+                                let proton_now = service
+                                    .is_installed(&settings_data, backend::components::ComponentType::Proton).await;
+                                
+                                state_signal.write().set_umu_ready(umu_now);
+                                state_signal.write().set_steamrt_ready(steamrt_now);
+                                state_signal.write().set_proton_ready(proton_now);
+                                
+                                if !proton_now {
+                                    debug!("Runtime dependencies installed.");
+                                }
+                            }
+                            Err(ref e) => {
+                                debug_error!("Failed to download UMU/SteamRT: {}", e);
+                                tracker.clear("runtime_setup");
+                                state_signal.write().set_runtime_active(false);
+                                return;
+                            }
+                        }
+                        runtime_result
+                    } else if !proton_installed {
+                        debug!("Runtime dependencies already installed. Downloading Proton...");
+                        state_signal.write().set_umu_ready(true);
+                        state_signal.write().set_steamrt_ready(true);
+                        
                         let proton_result = {
                             let mut component_manager = manager_arc.write().await;
                             backend::runners::Runners::download_proton(
@@ -345,22 +399,8 @@ pub fn create_component_setup_handler(
                         
                         match &proton_result {
                             Ok(downloaded_version) => {
-                                // Verify all runtime components are installed before marking ready
-                                let proton_installed = service
-                                    .is_installed(&settings_data, backend::components::ComponentType::Proton).await;
-                                let umu_installed = service
-                                    .is_installed(&settings_data, backend::components::ComponentType::Umu).await;
-                                let steamrt_installed = service.is_installed(
-                                    &settings_data,
-                                    backend::components::ComponentType::SteamRuntime,
-                                ).await;
-                                
-                                let all_ready = proton_installed && umu_installed && steamrt_installed;
-                                state_signal.write().set_proton_ready(all_ready);
-                                debug!(
-                                    "All Proton components status - Proton version {}, all_ready: {} (proton: {}, umu: {}, steamrt: {})",
-                                    downloaded_version, all_ready, proton_installed, umu_installed, steamrt_installed
-                                );
+                                debug!("Proton downloaded successfully: version {}", downloaded_version);
+                                state_signal.write().set_proton_ready(true);
                                 
                                 // Update default_preferences with the downloaded Proton version
                                 if let Ok(mut settings_guard) = settings_arc.write() {
@@ -381,6 +421,13 @@ pub fn create_component_setup_handler(
                             }
                         }
                         proton_result.map(|_| ())
+                    } else {
+                        // Everything is already installed
+                        debug!("All Proton components already installed");
+                        state_signal.write().set_proton_ready(true);
+                        state_signal.write().set_umu_ready(true);
+                        state_signal.write().set_steamrt_ready(true);
+                        Ok(())
                     }
                 }
             };
@@ -407,21 +454,32 @@ pub fn create_tweaks_setup_handler(
     game_id: String,
     progress_tracker: ProgressTracker,
     mut system_status: Signal<Option<SystemStatus>>,
-    mut game_state: GlobalGameStateSignal,
+    game_state: GlobalGameStateSignal,
     component_service: Signal<Option<crate::services::ComponentService>>,
 ) -> EventHandler<PressEvent> {
     EventHandler::new(move |_| {
         let game_id_clone = game_id.clone();
-
-        game_state.write().set_tweaks_active(&game_id_clone, true);
+        
+        let mut state_signal = game_state;
+        
+        // Atomically check and set the active flag
+        {
+            let mut state = state_signal.write();
+            if state.get_tweaks_state(&game_id_clone).active {
+                debug!("Tweaks setup already in progress for {}, ignoring duplicate click", game_id_clone);
+                return;
+            }
+            // Set active flag immediately to block other clicks
+            state.set_tweaks_active(&game_id_clone, true);
+        }
 
         let settings_arc = settings.read().clone();
         let tracker = progress_tracker.clone();
-        let mut state_signal = game_state;
 
         let service_opt = component_service.read().clone();
         let Some(service) = service_opt else {
             debug!("ComponentService not initialized yet");
+            // Reset the flag since we're not actually starting
             state_signal.write().set_tweaks_active(&game_id_clone, false);
             return;
         };
@@ -438,7 +496,7 @@ pub fn create_tweaks_setup_handler(
             },
         );
 
-        spawn(async move {
+        spawn_forever(async move {
             let settings_data = if let Ok(s) = settings_arc.read() { s.clone() } else {
                 state_signal.write().set_tweaks_active(&game_id_clone, false);
                 return;

@@ -49,17 +49,36 @@ async fn update_component_readiness(
 ) {
     match runner_type {
         RunnerType::Wine => {
-            let wine_installed = component_svc.is_installed(
-                settings_guard,
-                backend::components::ComponentType::Wine,
-            ).await;
+            // Get the configured Wine version for this game using preference inheritance
+            let runner = settings_guard.game_preferences.get(game_id)
+                .and_then(|prefs| prefs.runner.as_ref())
+                .unwrap_or(&settings_guard.default_preferences.runner);
+            
+            // Check if system wine is configured
+            let wine_ready = match runner {
+                backend::runners::Runners::Wine(wine) if wine.version == "system" => {
+                    // System wine is always "ready" if available
+                    backend::runners::is_system_wine_available()
+                },
+                backend::runners::Runners::Wine(_) => {
+                    // Check if wine component is installed
+                    component_svc.is_installed(
+                        settings_guard,
+                        backend::components::ComponentType::Wine,
+                    ).await
+                },
+                _ => false,
+            };
+            
             let dxvk_installed = component_svc.is_installed(
                 settings_guard,
                 backend::components::ComponentType::Dxvk,
             ).await;
-            game_state.write().set_wine_ready(wine_installed);
+            game_state.write().set_wine_ready(wine_ready);
             game_state.write().set_dxvk_ready(dxvk_installed);
             game_state.write().set_proton_ready(false);
+            game_state.write().set_umu_ready(false);
+            game_state.write().set_steamrt_ready(false);
         }
         RunnerType::Proton => {
             // Proton requires Proton itself, UMU launcher, and Steam Runtime
@@ -75,8 +94,10 @@ async fn update_component_readiness(
                 settings_guard,
                 backend::components::ComponentType::SteamRuntime,
             ).await;
-            let all_ready = proton_installed && umu_installed && steamrt_installed;
-            game_state.write().set_proton_ready(all_ready);
+            
+            game_state.write().set_proton_ready(proton_installed);
+            game_state.write().set_umu_ready(umu_installed);
+            game_state.write().set_steamrt_ready(steamrt_installed);
             game_state.write().set_wine_ready(false);
             game_state.write().set_dxvk_ready(false);
         }
@@ -304,7 +325,8 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
 
     let system_status = use_context::<Signal<Option<backend::status::SystemStatus>>>();
 
-    let progress_tracker = use_signal(ProgressTracker::new);
+    // Use the global progress_tracker from context to persist across navigation
+    let progress_tracker = use_context::<Signal<ProgressTracker>>();
     let progress_tracker_instance = progress_tracker();
 
     let (game_progress_key, get_progress) =
@@ -330,21 +352,15 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
             let is_game_installed = settings_guard.installed_games.contains_key(&game_id_for_state);
             game_state.write().set_download_installed(&game_id_for_state, is_game_installed);
 
-            // Determine runner type from game settings, preferences, or defaults
-            let runner_type = if let Some(game) = settings_guard.installed_games.get(&game_id_for_state) {
-                // Game is installed - use its runner
-                match &game.runner {
-                    backend::runners::Runners::Wine(_) => RunnerType::Wine,
-                    backend::runners::Runners::Native | backend::runners::Runners::Proton(_) => RunnerType::Proton,
-                }
-            } else if let Some(prefs) = settings_guard.game_preferences.get(&game_id_for_state) {
-                // Game has preferences - use those
-                match &prefs.runner {
+            // Determine runner type from preferences
+            let runner_type = if let Some(prefs) = settings_guard.game_preferences.get(&game_id_for_state) {
+                let resolved = prefs.merge_with_defaults(&settings_guard.default_preferences);
+                match &resolved.runner {
                     backend::runners::Runners::Wine(_) => RunnerType::Wine,
                     backend::runners::Runners::Native | backend::runners::Runners::Proton(_) => RunnerType::Proton,
                 }
             } else {
-                // No game-specific settings - use defaults
+                // No game-specific preferences - use defaults
                 match &settings_guard.default_preferences.runner {
                     backend::runners::Runners::Wine(_) => RunnerType::Wine,
                     backend::runners::Runners::Native | backend::runners::Runners::Proton(_) => RunnerType::Proton,
@@ -379,6 +395,7 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
     let progress_tracker_for_tweaks = progress_tracker_instance.clone();
     let game_id_for_tweaks = game_data.id.clone();
     let game_id_for_download = game_data.id.clone();
+    let game_id_for_runtime = game_data.id.clone();
     let game_biz_for_download = game_data.biz.clone();
 
     let on_setup_runtime = use_memo(move || {
@@ -388,6 +405,7 @@ pub fn GameContent(selected_game_id: Signal<Option<String>>) -> Element {
             system_status,
             game_state,
             component_service,
+            game_id_for_runtime.clone(),
         )
     });
 

@@ -593,20 +593,20 @@ fn load_initial_settings(
     if let Ok(settings_guard) = settings.read() {
         match context {
             SettingsContext::General => {
-                // Load from default preferences and global settings
+                // Load from default preferences
                 let prefs = &settings_guard.default_preferences;
-                let mut result = load_preferences_values(prefs);
+                let mut result = load_default_preferences_values(prefs);
                 result.8 = settings_guard.disable_videos;
                 result
             }
             SettingsContext::Game { game_id, .. } => {
-                // Try installed game first, then preferences, then default
-                let mut result = if let Some(game) = settings_guard.installed_games.get(game_id) {
-                    load_game_values(game)
-                } else if let Some(prefs) = settings_guard.game_preferences.get(game_id) {
-                    load_preferences_values(prefs)
+                let mut result = if let Some(game_prefs) = settings_guard.game_preferences.get(game_id) {
+                    // Merge game preferences with defaults to get resolved values
+                    let resolved = game_prefs.merge_with_defaults(&settings_guard.default_preferences);
+                    load_resolved_preferences_values(&resolved)
                 } else {
-                    load_preferences_values(&settings_guard.default_preferences)
+                    // No game-specific preferences, use defaults
+                    load_default_preferences_values(&settings_guard.default_preferences)
                 };
                 result.8 = settings_guard.disable_videos;
                 result
@@ -614,18 +614,17 @@ fn load_initial_settings(
         }
     } else {
         // Use global default if can't read settings
-        let prefs = backend::settings::GamePreferences::default();
-        load_preferences_values(&prefs)
+        let prefs = backend::settings::DefaultGamePreferences::default();
+        load_default_preferences_values(&prefs)
     }
 }
 
-/// Load values from `GamePreferences`
-fn load_preferences_values(
-    prefs: &backend::settings::GamePreferences,
+/// Load values from `DefaultGamePreferences` (general settings)
+fn load_default_preferences_values(
+    prefs: &backend::settings::DefaultGamePreferences,
 ) -> (RunnerType, String, String, String, String, bool, bool, bool, bool) {
     let (runner_type, wine_ver, proton_ver) = match &prefs.runner {
         Runners::Native => {
-            // Native runner shouldn't exist in settings, but if it does, default to Wine
             debug_error!("Native runner found in preferences, defaulting to Wine");
             (RunnerType::Wine, String::new(), String::new())
         }
@@ -655,11 +654,51 @@ fn load_preferences_values(
         prefs.enable_winewayland,
         prefs.enable_mangohud,
         prefs.enable_gamemode,
-        false, // disable_videos default (will be overwritten from GlobalSettings)
+        false,
+    )
+}
+
+/// Load values from `ResolvedGamePreferences` (game settings merged with defaults)
+fn load_resolved_preferences_values(
+    prefs: &backend::settings::ResolvedGamePreferences,
+) -> (RunnerType, String, String, String, String, bool, bool, bool, bool) {
+    let (runner_type, wine_ver, proton_ver) = match &prefs.runner {
+        Runners::Native => {
+            debug_error!("Native runner found in preferences, defaulting to Wine");
+            (RunnerType::Wine, String::new(), String::new())
+        }
+        Runners::Wine(wine) => (RunnerType::Wine, wine.version.clone(), String::new()),
+        Runners::Proton(proton) => (RunnerType::Proton, String::new(), proton.version.clone()),
+    };
+
+    let dxvk_ver = prefs
+        .runtime_components
+        .iter()
+        .find_map(|component| {
+            if let backend::settings::RuntimeComponents::Dxvk(version) = component {
+                Some(version.clone())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default();
+
+    let wrapper = prefs.command_wrapper.clone().unwrap_or_default();
+    (
+        runner_type,
+        wine_ver,
+        proton_ver,
+        dxvk_ver,
+        wrapper,
+        prefs.enable_winewayland,
+        prefs.enable_mangohud,
+        prefs.enable_gamemode,
+        false,
     )
 }
 
 /// Load values from `InstalledGame`
+#[allow(dead_code)]
 fn load_game_values(
     game: &backend::settings::InstalledGame,
 ) -> (RunnerType, String, String, String, String, bool, bool, bool, bool) {
@@ -714,7 +753,18 @@ pub struct SaveSettingsParams {
     pub disable_videos: bool,
 }
 
+/// we love making a mess
+fn matches_runner(r1: &Runners, r2: &Runners) -> bool {
+    match (r1, r2) {
+        (Runners::Wine(w1), Runners::Wine(w2)) => w1.version == w2.version,
+        (Runners::Proton(p1), Runners::Proton(p2)) => p1.version == p2.version,
+        (Runners::Native, Runners::Native) => true,
+        _ => false,
+    }
+}
+
 /// Save settings to disk based on context
+#[allow(clippy::too_many_lines)]
 pub fn save_settings_to_disk_sync(
     settings_arc: &Arc<RwLock<GlobalSettings>>,
     context: SettingsContext,
@@ -751,16 +801,14 @@ pub fn save_settings_to_disk_sync(
 
         match context {
             SettingsContext::General => {
-                // Update default preferences - preserve existing playtime
-                let existing_playtime = settings.default_preferences.playtime_seconds;
-                settings.default_preferences = backend::settings::GamePreferences {
+                // Update default preferences
+                settings.default_preferences = backend::settings::DefaultGamePreferences {
                     runner: runner.clone(),
                     runtime_components,
                     command_wrapper,
                     enable_winewayland: params.winewayland,
                     enable_mangohud: params.mangohud,
                     enable_gamemode: params.gamemode,
-                    playtime_seconds: existing_playtime,
                     use_directx11: false,
                 };
 
@@ -777,27 +825,81 @@ pub fn save_settings_to_disk_sync(
                     game.enable_gamemode = params.gamemode;
                 }
 
-                // Always save to game_preferences (even for uninstalled games)
-                // Preserve existing playtime if it exists
+                // For game preferences, only save fields that differ from defaults
+                let default_prefs = &settings.default_preferences;
+                
+                // Determine which fields differ from defaults
+                let runner_override = if matches_runner(&runner, &default_prefs.runner) {
+                    None
+                } else {
+                    Some(runner.clone())
+                };
+                
+                let runtime_components_override = if runtime_components == default_prefs.runtime_components {
+                    None
+                } else {
+                    Some(runtime_components.clone())
+                };
+                
+                let command_wrapper_override = if command_wrapper == default_prefs.command_wrapper {
+                    None
+                } else {
+                    Some(command_wrapper.clone())
+                };
+                
+                let winewayland_override = if params.winewayland == default_prefs.enable_winewayland {
+                    None
+                } else {
+                    Some(params.winewayland)
+                };
+                
+                let mangohud_override = if params.mangohud == default_prefs.enable_mangohud {
+                    None
+                } else {
+                    Some(params.mangohud)
+                };
+                
+                let gamemode_override = if params.gamemode == default_prefs.enable_gamemode {
+                    None
+                } else {
+                    Some(params.gamemode)
+                };
+
+                // Preserve existing playtime
                 let existing_playtime = settings.game_preferences
                     .get(&game_id)
                     .map_or(0, |prefs| prefs.playtime_seconds);
-                
-                settings.game_preferences.insert(
-                    game_id.clone(),
-                    backend::settings::GamePreferences {
-                        runner,
-                        runtime_components,
-                        command_wrapper,
-                        enable_winewayland: params.winewayland,
-                        enable_mangohud: params.mangohud,
-                        enable_gamemode: params.gamemode,
-                        playtime_seconds: existing_playtime,
-                        use_directx11: false,
-                    },
-                );
 
-                debug_info!("Settings saved successfully for game {}", game_id);
+                // Check if any field differs from defaults (excluding playtime)
+                // fixme: this is... something
+                let has_overrides = runner_override.is_some()
+                    || runtime_components_override.is_some()
+                    || command_wrapper_override.is_some()
+                    || winewayland_override.is_some()
+                    || mangohud_override.is_some()
+                    || gamemode_override.is_some();
+
+                if has_overrides || existing_playtime > 0 {
+                    // Save game preferences with only overridden fields
+                    settings.game_preferences.insert(
+                        game_id.clone(),
+                        backend::settings::GamePreferences {
+                            runner: runner_override,
+                            runtime_components: runtime_components_override,
+                            command_wrapper: command_wrapper_override,
+                            enable_winewayland: winewayland_override,
+                            enable_mangohud: mangohud_override,
+                            enable_gamemode: gamemode_override,
+                            playtime_seconds: existing_playtime,
+                            use_directx11: None, // this will be nuked soon
+                        },
+                    );
+                    debug_info!("Settings saved for game {} with field-level overrides", game_id);
+                } else {
+                    // No overrides and no playtime, remove entry completely
+                    settings.game_preferences.remove(&game_id);
+                    debug_info!("Settings match defaults for game {}, removed game_preferences entry", game_id);
+                }
             }
         }
 

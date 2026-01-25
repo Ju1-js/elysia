@@ -17,7 +17,7 @@ pub struct GlobalSettings {
     pub games_directory: PathBuf,
     pub installed_games: HashMap<String, InstalledGame>,
     pub game_preferences: HashMap<String, GamePreferences>,
-    pub default_preferences: GamePreferences,
+    pub default_preferences: DefaultGamePreferences,
     pub disable_videos: bool,
     pub last_announcement_hash: Option<String>,
 }
@@ -38,7 +38,7 @@ impl Default for GlobalSettings {
             games_directory,
             installed_games: HashMap::new(),
             game_preferences: HashMap::new(),
-            default_preferences: GamePreferences::default(),
+            default_preferences: DefaultGamePreferences::default(),
             disable_videos: false,
             last_announcement_hash: None,
         }
@@ -139,7 +139,7 @@ impl Default for InstalledGame {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum RuntimeComponents {
     Dxvk(ComponentVersion),
     Vkd3dProton(ComponentVersion),
@@ -148,11 +148,111 @@ pub enum RuntimeComponents {
 
 type ComponentVersion = String;
 
-/// Game preferences stored even before a game is installed
+/// Default game preferences - all fields are concrete values used as the base
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 #[allow(clippy::struct_excessive_bools)]
+pub struct DefaultGamePreferences {
+    pub runner: Runners,
+    pub runtime_components: Vec<RuntimeComponents>,
+    pub command_wrapper: Option<String>,
+    pub enable_winewayland: bool,
+    pub enable_mangohud: bool,
+    pub enable_gamemode: bool,
+    #[serde(default)]
+    pub use_directx11: bool,
+}
+
+impl Default for DefaultGamePreferences {
+    fn default() -> Self {
+        Self {
+            runner: Runners::Proton(crate::runners::Proton {
+                version: String::new(),
+            }),
+            runtime_components: Vec::new(),
+            command_wrapper: None,
+            enable_winewayland: false,
+            enable_mangohud: false,
+            enable_gamemode: false,
+            use_directx11: false,
+        }
+    }
+}
+
+/// Per-game preferences
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct GamePreferences {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runner: Option<Runners>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_components: Option<Vec<RuntimeComponents>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command_wrapper: Option<Option<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_winewayland: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_mangohud: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_gamemode: Option<bool>,
+    /// Playtime tracking (never inherited, always stored)
+    #[serde(default)]
+    pub playtime_seconds: u64,
+    /// fixme: this should be in tweaks, its not for every game
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_directx11: Option<bool>,
+}
+
+impl GamePreferences {
+    /// Merge with defaults to get resolved values for all fields
+    #[must_use]
+    pub fn merge_with_defaults(&self, defaults: &DefaultGamePreferences) -> ResolvedGamePreferences {
+        ResolvedGamePreferences {
+            runner: self.runner.clone().unwrap_or_else(|| defaults.runner.clone()),
+            runtime_components: self.runtime_components.clone().unwrap_or_else(|| defaults.runtime_components.clone()),
+            command_wrapper: self.command_wrapper.clone().unwrap_or(defaults.command_wrapper.clone()),
+            enable_winewayland: self.enable_winewayland.unwrap_or(defaults.enable_winewayland),
+            enable_mangohud: self.enable_mangohud.unwrap_or(defaults.enable_mangohud),
+            enable_gamemode: self.enable_gamemode.unwrap_or(defaults.enable_gamemode),
+            playtime_seconds: self.playtime_seconds,
+            use_directx11: self.use_directx11.unwrap_or(defaults.use_directx11),
+        }
+    }
+    
+    /// Create `GamePreferences` from old format for backward compatibility
+    pub(crate) fn from_legacy(legacy: LegacyGamePreferences) -> Self {
+        Self {
+            runner: Some(legacy.runner),
+            runtime_components: Some(legacy.runtime_components),
+            command_wrapper: Some(legacy.command_wrapper),
+            enable_winewayland: Some(legacy.enable_winewayland),
+            enable_mangohud: Some(legacy.enable_mangohud),
+            enable_gamemode: Some(legacy.enable_gamemode),
+            playtime_seconds: legacy.playtime_seconds,
+            use_directx11: Some(legacy.use_directx11),
+        }
+    }
+}
+
+/// Resolved preferences with all fields having concrete values
+#[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct ResolvedGamePreferences {
+    pub runner: Runners,
+    pub runtime_components: Vec<RuntimeComponents>,
+    pub command_wrapper: Option<String>,
+    pub enable_winewayland: bool,
+    pub enable_mangohud: bool,
+    pub enable_gamemode: bool,
+    pub playtime_seconds: u64,
+    pub use_directx11: bool,
+}
+
+/// Old format for backward compatibility during migration
+#[derive(Debug, Clone, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
+pub(crate) struct LegacyGamePreferences {
     pub runner: Runners,
     pub runtime_components: Vec<RuntimeComponents>,
     pub command_wrapper: Option<String>,
@@ -163,21 +263,4 @@ pub struct GamePreferences {
     pub playtime_seconds: u64,
     #[serde(default)]
     pub use_directx11: bool,
-}
-
-impl Default for GamePreferences {
-    fn default() -> Self {
-        Self {
-            runner: Runners::Proton(crate::runners::Proton {
-                version: String::new(), // Empty version will be resolved to first available Proton (typically the latest)
-            }),
-            runtime_components: Vec::new(),
-            command_wrapper: None,
-            enable_winewayland: false,
-            enable_mangohud: false,
-            enable_gamemode: false,
-            playtime_seconds: 0,
-            use_directx11: false,
-        }
-    }
 }

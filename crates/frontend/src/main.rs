@@ -24,6 +24,7 @@ use crate::pages::state::GlobalGameState;
 use backend::{
     components::tweaks::TweakManifest,
     game_providers::hoyoplay::{get_game_content, get_games, get_video_url},
+    progress::ProgressTracker,
     runners::Runners,
     settings::{GlobalSettings, InstalledGame},
     status::SystemStatus,
@@ -204,6 +205,10 @@ fn app() -> Element {
     // GlobalGameState is the single source of truth for game state management
     let game_state = use_signal(GlobalGameState::new);
     use_context_provider(|| game_state);
+
+    // Global ProgressTracker persists across navigation to preserve download progress
+    let progress_tracker = use_signal(ProgressTracker::new);
+    use_context_provider(|| progress_tracker);
 
     let init_settings = settings;
     let mut game_state_initialized = use_signal(|| false);

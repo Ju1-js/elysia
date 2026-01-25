@@ -32,17 +32,20 @@ pub enum RunnerType {
 }
 
 #[derive(Clone, Debug, Default)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ComponentSetupState {
     pub wine_ready: bool,
     pub dxvk_ready: bool,
     pub proton_ready: bool,
+    pub umu_ready: bool,
+    pub steamrt_ready: bool,
 }
 
 impl ComponentSetupState {
     pub fn is_ready_for(&self, runner_type: &RunnerType) -> bool {
         match runner_type {
             RunnerType::Wine => self.wine_ready && self.dxvk_ready,
-            RunnerType::Proton => self.proton_ready,
+            RunnerType::Proton => self.proton_ready && self.umu_ready && self.steamrt_ready,
         }
     }
 
@@ -59,11 +62,17 @@ impl ComponentSetupState {
                 missing
             }
             RunnerType::Proton => {
-                if self.proton_ready {
-                    vec![]
-                } else {
-                    vec!["Proton"]
+                let mut missing = Vec::new();
+                if !self.proton_ready {
+                    missing.push("Proton");
                 }
+                if !self.umu_ready {
+                    missing.push("UMU");
+                }
+                if !self.steamrt_ready {
+                    missing.push("Steam Runtime");
+                }
+                missing
             }
         }
     }
@@ -171,6 +180,14 @@ impl GlobalGameState {
 
     pub fn set_proton_ready(&mut self, ready: bool) {
         self.component_setup.proton_ready = ready;
+    }
+
+    pub fn set_umu_ready(&mut self, ready: bool) {
+        self.component_setup.umu_ready = ready;
+    }
+
+    pub fn set_steamrt_ready(&mut self, ready: bool) {
+        self.component_setup.steamrt_ready = ready;
     }
 
     pub fn is_runtime_ready(&self) -> bool {

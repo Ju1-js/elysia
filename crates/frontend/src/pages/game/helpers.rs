@@ -58,10 +58,19 @@ pub fn create_game_download_handler(
 ) -> EventHandler<PressEvent>
 {
     EventHandler::new(move |_| {
-        let settings_arc = settings.read().clone();
         let game_id_clone = game_id.clone();
+        
+        // Atomically check and set the active flag
+        {
+            let state = game_state.read();
+            if state.get_download_state(&game_id).active {
+                eprintln!("[Game Download] Download already in progress for {game_id}, ignoring duplicate click");
+                return;
+            }
+        }
+        
+        let settings_arc = settings.read().clone();
 
-        // CRITICAL: Always check actual settings.installed_games, not just state signal
         // The state signal can be stale when switching between games
         let Ok(settings_guard) = settings_arc.read() else {
             eprintln!("[Game Handler] Failed to read settings");
@@ -77,8 +86,8 @@ pub fn create_game_download_handler(
             settings_guard.installed_games.contains_key(&game_id)
         );
 
+        // lol
         if is_actually_installed {
-            // Game is installed - LAUNCH IT
             let Some(installed_game) = settings_guard.installed_games.get(&game_id) else {
                 eprintln!("[Game Launch] ERROR: Game {game_id} in installed_games but get() returned None!");
                 return;
@@ -141,19 +150,13 @@ pub fn create_game_download_handler(
                     let pid = child.id();
                     eprintln!("[Game Launch] Game process started with PID: {pid}, waiting for completion...");
                     
-                    // Drop settings_guard before spawning async task
                     drop(settings_guard);
-                    
-                    // Set game running state with PID, wine_path, and wine_prefix
                     game_state.write().set_game_running(true, Some(pid), runner_path_opt, wine_prefix_opt);
-                    
-                    // Pause the video player to save resources
                     eprintln!("[Game Launch] Pausing video player");
                     video_state.write().pause();
                     
                     // Spawn a blocking task to wait for the game to close
                     spawn(async move {
-                        // Use spawn_blocking to wait for the process in a separate thread
                         let mut child_handle = child;
                         let result = tokio::task::spawn_blocking(move || {
                             child_handle.wait()
@@ -208,8 +211,17 @@ pub fn create_game_download_handler(
             return;
         }
 
-        // Game is NOT installed - DOWNLOAD IT
         eprintln!("[Game Download] Starting download for game: {game_id}");
+        
+        // Set download active flag immediately
+        {
+            let mut state = game_state.write();
+            if state.get_download_state(&game_id).active {
+                eprintln!("[Game Download] Download already started by concurrent click, aborting");
+                return;
+            }
+            state.set_download_active(&game_id_clone, true);
+        }
         
         drop(settings_guard);
         
@@ -217,11 +229,7 @@ pub fn create_game_download_handler(
         let mut settings_mut = settings;
         let mut state_signal = game_state;
 
-        state_signal
-            .write()
-            .set_download_active(&game_id_clone, true);
-
-        spawn(async move {
+        spawn_forever(async move {
             let installer = {
                 let Ok(settings_guard) = settings_arc.read() else {
                     state_signal

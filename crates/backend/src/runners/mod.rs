@@ -177,6 +177,21 @@ impl Runners {
                     }
                 }
                 
+                // fixme: this is really bad :xdduwu:
+                result.sort_by(|a, b| {
+                    let a_source = a.source.as_deref().unwrap_or("");
+                    let b_src = b.source.as_deref().unwrap_or("");
+
+                    let a_is_dwproton = a_source.eq_ignore_ascii_case("dwproton");
+                    let b_is_dwproton = b_src.eq_ignore_ascii_case("dwproton");
+                    
+                    match (a_is_dwproton, b_is_dwproton) {
+                        (true, false) => std::cmp::Ordering::Less,
+                        (false, true) => std::cmp::Ordering::Greater,
+                        _ => a_source.cmp(b_src),
+                    }
+                });
+                
                 result
             })
             .unwrap_or_default();

@@ -176,6 +176,9 @@ fn ComponentDownloadButton(
                         if *is_downloading.read() {
                             return;
                         }
+                        
+                        // Set downloading flag immediately to prevent double-clicks
+                        is_downloading.set(true);
 
                         let version = selected_version.read().clone();
                         let settings = settings_signal.read();

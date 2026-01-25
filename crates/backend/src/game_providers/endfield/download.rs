@@ -561,6 +561,22 @@ pub async fn download_and_extract_streaming(
             .map_err(|e| format!("Failed to write installation marker: {e}"))?;
 
         eprintln!("[INFO] Created installation marker at {}", marker_path.display());
+        
+        // Set is_busy to false to signal completion, then clear progress
+        set_progress(
+            progress_key,
+            Progress {
+                downloaded: archive.total_size(),
+                total: archive.total_size(),
+                mb_s: 0.0,
+                part_index: archive.packs.len(),
+                parts_total: archive.packs.len(),
+                status: "Complete".to_string(),
+                is_busy: false,
+            },
+        );
+        
+        clear_progress(progress_key);
     } else {
         clear_progress(progress_key);
     }

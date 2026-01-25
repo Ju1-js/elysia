@@ -280,29 +280,28 @@ impl ComponentManager {
         .await??;
 
         // Fix double-nesting: if dest_dir only contains a single directory, flatten it
-        // Exception: Don't flatten SteamRuntime as it needs to keep SteamLinuxRuntime_sniper subdirectory
         if component_type != ComponentType::SteamRuntime {
-            let entries: Vec<_> = std::fs::read_dir(&dest_dir)?
-                .filter_map(std::result::Result::ok)
-                .collect();
-            
-            if entries.len() == 1 && entries[0].path().is_dir() {
-                let inner_dir = entries[0].path();
-                let Some(parent) = dest_dir.parent() else {
-                    return Err(anyhow::anyhow!("Destination directory has no parent"));
-                };
-                let temp_dir = parent.join(format!("{}_temp", component_version.version));
+            loop {
+                let entries: Vec<_> = std::fs::read_dir(&dest_dir)?
+                    .filter_map(std::result::Result::ok)
+                    .collect();
                 
-                // Move inner directory to temp location
-                std::fs::rename(&inner_dir, &temp_dir)?;
-                
-                // Remove outer directory
-                std::fs::remove_dir(&dest_dir)?;
-                
-                // Rename temp to correct location
-                std::fs::rename(&temp_dir, &dest_dir)?;
-                
-                println!("   Flattened nested directory structure");
+                // Only flatten if there's exactly one entry and it's a directory
+                if entries.len() == 1 && entries[0].path().is_dir() {
+                    let inner_dir = entries[0].path();
+                    let Some(parent) = dest_dir.parent() else {
+                        return Err(anyhow::anyhow!("Destination directory has no parent"));
+                    };
+                    let temp_dir = parent.join(format!("{}_temp", component_version.version));
+                    
+                    std::fs::rename(&inner_dir, &temp_dir)?;
+                    std::fs::remove_dir(&dest_dir)?;
+                    std::fs::rename(&temp_dir, &dest_dir)?;
+                    
+                    println!("Flattened nested directory structure");
+                } else {
+                    break;
+                }
             }
         }
 

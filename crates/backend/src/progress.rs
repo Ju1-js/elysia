@@ -42,6 +42,9 @@ impl ProgressTracker {
         component_name: &str,
         params: ReportParams,
     ) {
+        eprintln!("[ProgressTracker] report() called - key: {}, component: {}, downloaded: {}/{}, is_busy: {}", 
+            key, component_name, params.downloaded, params.total, params.is_busy);
+        
         let progress = ComponentProgress {
             component_name: component_name.to_string(),
             downloaded: params.downloaded,
@@ -54,6 +57,7 @@ impl ProgressTracker {
 
         let mut map = self.progress.write().expect("Progress lock poisoned");
         map.insert(key.to_string(), progress);
+        eprintln!("[ProgressTracker] Progress stored successfully for key: {key}");
     }
 
     /// # Panics
@@ -61,7 +65,11 @@ impl ProgressTracker {
     #[must_use] 
     pub fn get(&self, key: &str) -> Option<ComponentProgress> {
         let map = self.progress.read().expect("Progress lock poisoned");
-        map.get(key).cloned()
+        let result = map.get(key).cloned();
+        if result.is_some() {
+            eprintln!("[ProgressTracker] get() found progress for key: {key}");
+        }
+        result
     }
 
     /// # Panics
