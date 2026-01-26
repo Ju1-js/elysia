@@ -1,4 +1,5 @@
 use crate::components::MyButton;
+use backend::meow::meow;
 use freya::prelude::*;
 
 #[component]
@@ -15,7 +16,7 @@ pub fn TopRightButtons() -> Element {
             padding: "0 32",
 
             MyButton {
-                onpress: move |_| println!("Meow clicked!"),
+                onpress: move |_| meow(),
                 label {
                     font_size: "16",
                     font_weight: "500",
