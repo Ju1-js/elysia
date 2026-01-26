@@ -100,7 +100,6 @@ pub fn create_game_download_handler(
             settings_guard.installed_games.contains_key(&game_id)
         );
 
-        // lol
         if is_actually_installed {
             let Some(installed_game) = settings_guard.installed_games.get(&game_id) else {
                 eprintln!("[Game Launch] ERROR: Game {game_id} in installed_games but get() returned None!");
@@ -109,17 +108,23 @@ pub fn create_game_download_handler(
 
             eprintln!("[Game Launch] Launching game: {game_id}");
             
+            // Get runner from preferences system
+            let game_prefs = settings_guard.game_preferences
+                .get(&game_id)
+                .cloned()
+                .unwrap_or_default();
+            let resolved = game_prefs.merge_with_defaults(&settings_guard.default_preferences);
+            let runner = resolved.runner;
+            
             // Extract runner info (both path and prefix) for Wine/Proton
-            let (runner_path_opt, wine_prefix_opt) = match &installed_game.runner {
+            let (runner_path_opt, wine_prefix_opt) = match &runner {
                 backend::runners::Runners::Wine(wine) => {
-                    // Resolve the Wine version (handles "auto" and empty versions)
                     let resolved_version = wine.resolve_version(&settings_guard)
                         .unwrap_or_else(|e| {
                             eprintln!("[Game Launch] Warning: Failed to resolve Wine version: {e}, using configured version: {}", wine.version);
                             wine.version.clone()
                         });
                     
-                    // For system wine, use the directory from PATH
                     let wine_dir = if resolved_version == "system" {
                         backend::runners::get_system_wine_dir()
                             .unwrap_or_else(|| {
@@ -137,7 +142,6 @@ pub fn create_game_download_handler(
                     )
                 }
                 backend::runners::Runners::Proton(proton) => {
-                    // Resolve the Proton version (handles "auto" and empty versions)
                     let resolved_version = proton.resolve_version(&settings_guard)
                         .unwrap_or_else(|e| {
                             eprintln!("[Game Launch] Warning: Failed to resolve Proton version: {e}, using configured version: {}", proton.version);
@@ -154,11 +158,8 @@ pub fn create_game_download_handler(
                 }
                 backend::runners::Runners::Native => (None, None),
             };
-            
-            // Launch the game and get the process handle
-            match installed_game
-                .runner
-                .run_game(&settings_guard, installed_game)
+
+            match runner.run_game(&settings_guard, installed_game)
             {
                 Ok(child) => {
                     let pid = child.id();
@@ -189,16 +190,12 @@ pub fn create_game_download_handler(
                         }
                         
                         eprintln!("[Game Launch] Game closed, clearing running state and resuming video");
-                        // Calculate playtime
                         let elapsed_seconds = game_state.read().get_elapsed_playtime();
                         eprintln!("[Game Launch] Game played for {elapsed_seconds} seconds");
                         
-                        // Clear game running state after game closes
                         game_state.write().set_game_running(false, None, None, None);
                         
-                        // Update playtime in game_preferences
                         if let Ok(mut settings_guard) = settings_arc.write() {
-                            // Get or create game preferences for this game
                             let prefs = settings_guard.game_preferences
                                 .entry(game_id_clone.clone())
                                 .or_insert_with(backend::settings::GamePreferences::default);
@@ -206,19 +203,16 @@ pub fn create_game_download_handler(
                             prefs.playtime_seconds += elapsed_seconds;
                             eprintln!("[Game Launch] Total playtime for {}: {} seconds", game_id_clone, prefs.playtime_seconds);
                             
-                            // Save settings to persist playtime
                             if let Err(e) = settings_guard.save() {
                                 eprintln!("[Game Launch] Failed to save playtime: {e}");
                             }
                         }
                         
-                        // Resume the video player
                         video_state.write().resume();
                     });
                 }
                 Err(e) => {
                     eprintln!("[Game Launch] Failed to run game: {e}");
-                    // Clear running state if launch failed
                     game_state.write().set_game_running(false, None, None, None);
                 }
             }
@@ -227,7 +221,6 @@ pub fn create_game_download_handler(
 
         eprintln!("[Game Download] Starting download for game: {game_id}");
         
-        // Set download active flag immediately
         {
             let mut state = game_state.write();
             if state.get_download_state(&game_id).active {
@@ -305,7 +298,6 @@ pub fn create_game_update_handler(
         let game_id = game_id.clone();
         let biz = biz.clone();
         
-        // Check if already updating
         {
             let state = game_state.read();
             if state.downloads.get(&game_id).is_some_and(|d| d.update_active) {
@@ -320,7 +312,6 @@ pub fn create_game_update_handler(
         spawn_forever(async move {
             eprintln!("[Game Update] Starting update for {game_id}");
             
-            // Set both update_active (for button state) and active (for progress polling)
             state_signal.write().set_game_update_active(&game_id, true);
             state_signal.write().set_download_active(&game_id, true);
             
@@ -347,7 +338,6 @@ pub fn create_game_update_handler(
                 (install_path, settings_guard.temp_directory.clone())
             };
             
-            // Only Endfield supports updates currently
             if biz != "endfield" {
                 eprintln!("[Game Update] Game updates not supported for: {biz}");
                 state_signal.write().set_game_update_active(&game_id, false);
@@ -363,13 +353,11 @@ pub fn create_game_update_handler(
                 Ok(()) => {
                     eprintln!("[Game Update] Update completed successfully for {game_id}");
                     
-                    // Clear update state
                     state_signal.write().set_game_update_active(&game_id, false);
                     state_signal.write().set_download_active(&game_id, false);
                     state_signal.write().set_game_update_available(&game_id, false);
                     state_signal.write().set_download_progress(&game_id, None);
                     
-                    // Update version info
                     if let Ok(new_version) = backend::game_providers::endfield::Game::new(&install_path).get_version() {
                         state_signal.write().set_game_versions(
                             &game_id,
@@ -381,7 +369,6 @@ pub fn create_game_update_handler(
                 Err(e) => {
                     eprintln!("[Game Update] Update failed: {e}");
                     
-                    // Clear update state
                     state_signal.write().set_game_update_active(&game_id, false);
                     state_signal.write().set_download_active(&game_id, false);
                     state_signal.write().set_download_progress(&game_id, None);
