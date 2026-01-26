@@ -8,8 +8,6 @@
 
 > ⚠️ Elysia is still in very early development! Please report any issues. ⚠️
 
-<img src="assets/elysia.png" alt="Elysia Launcher" width="200"/>
-
 </div>
 
 ## Installation
@@ -24,9 +22,15 @@ You can grab the latest `elysia.flatpak` from the [Releases](https://dawn.wine/e
 yay -S elysia-bin
 ```
 
+**or, if you prefer the -git version:**
+
+```
+yay -S elysia-git
+```
+
 ### Native binary / Build from source
 
-Note that you'll need `ffmpeg>=8.0` for Elysia to build correctly.
+Note that you'll need `ffmpeg>=8.0` and `clang` for Elysia to build correctly.
 
 ```
 git clone https://dawn.wine/elysia/elysia.git
@@ -39,3 +43,5 @@ cargo build --release --bin elysia
 ## Support
 
 Elysia is still very work-in-progress: if you meet any bugs, please make an issue or ask for help at [our discord server!](https://discord.gg/ck37X6UWBp)
+
+<img src="assets/elysia.png" alt="Elysia Launcher" width="200"/>
