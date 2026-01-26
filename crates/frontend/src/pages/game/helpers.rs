@@ -108,16 +108,24 @@ pub fn create_game_download_handler(
 
             eprintln!("[Game Launch] Launching game: {game_id}");
             
-            // Get runner from preferences system
             let game_prefs = settings_guard.game_preferences
                 .get(&game_id)
                 .cloned()
                 .unwrap_or_default();
             let resolved = game_prefs.merge_with_defaults(&settings_guard.default_preferences);
-            let runner = resolved.runner;
+            
+            // holy junk
+            let mut game_with_prefs = installed_game.clone();
+            game_with_prefs.runner = resolved.runner.clone();
+            game_with_prefs.runtime_components = resolved.runtime_components;
+            game_with_prefs.command_wrapper = resolved.command_wrapper;
+            game_with_prefs.enable_winewayland = resolved.enable_winewayland;
+            game_with_prefs.enable_mangohud = resolved.enable_mangohud;
+            game_with_prefs.enable_gamemode = resolved.enable_gamemode;
+            game_with_prefs.use_directx11 = resolved.use_directx11;
             
             // Extract runner info (both path and prefix) for Wine/Proton
-            let (runner_path_opt, wine_prefix_opt) = match &runner {
+            let (runner_path_opt, wine_prefix_opt) = match &resolved.runner {
                 backend::runners::Runners::Wine(wine) => {
                     let resolved_version = wine.resolve_version(&settings_guard)
                         .unwrap_or_else(|e| {
@@ -159,7 +167,7 @@ pub fn create_game_download_handler(
                 backend::runners::Runners::Native => (None, None),
             };
 
-            match runner.run_game(&settings_guard, installed_game)
+            match resolved.runner.run_game(&settings_guard, &game_with_prefs)
             {
                 Ok(child) => {
                     let pid = child.id();
