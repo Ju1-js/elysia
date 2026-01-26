@@ -25,6 +25,20 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.2.0" date="2026-01-26">
+      <description>
+        <p>Added support for game client updates</p>
+        <p>'Meow' button now supports playing audios, including custom ones</p>
+        <p>Fixed system Wine detection locked to /usr/bin</p>
+        <p>Fixed settings inheritance between general/game settings</p>
+        <p>Fixed issues with runners downloads/extraction, set dwproton as default</p>
+        <p>Fixed some issues with UI elements overlapping</p>
+        <p>Fixed gamemode not working</p>
+        <p>Fixed Proton not prompting SteamRT/umu downloads if downloaded from settings</p>
+        <p>Fixed downloads resetting when switching to a different page (e.g. settings)</p>
+        <p>Fixed Wine dropdown not showing all parsed entries from components</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-01-18">
       <description>
         <p>First release! Experimental AK-E support.</p>
