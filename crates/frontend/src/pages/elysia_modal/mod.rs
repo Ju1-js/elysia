@@ -1,6 +1,6 @@
 use freya::prelude::*;
 
-const ELYSIA_VERSION: &str = "v0.1";
+const ELYSIA_VERSION: &str = "v0.2";
 
 #[component]
 pub fn ElysiaModal(on_close: EventHandler<()>, scale: f64) -> Element {
