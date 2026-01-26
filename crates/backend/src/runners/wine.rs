@@ -20,11 +20,7 @@ impl Runner for Wine {
 }
 
 impl Wine {
-    /// Kill a Wine process using wineserver
-    /// # Errors
-    /// Returns an error if wineserver cannot be executed.
     pub fn kill_wine_process(wine_path: &str, prefix_path: &str) -> Result<()> {
-        // For system wine, use wineserver from PATH directly
         let is_system_wine = if let Some(system_wine_dir) = super::get_system_wine_dir() {
             std::path::Path::new(wine_path) == system_wine_dir
         } else {
@@ -48,28 +44,17 @@ impl Wine {
         }
     }
 
-    /// Launch winecfg utility with proper environment settings
-    /// # Errors
-    /// Returns an error if winecfg cannot be launched.
     pub fn launch_winecfg(&self, settings: &GlobalSettings, game: &InstalledGame) -> Result<()> {
         self.launch_utility(settings, game, "winecfg")
     }
 
-    /// Launch regedit utility with proper environment settings
-    /// # Errors
-    /// Returns an error if regedit cannot be launched.
     pub fn launch_regedit(&self, settings: &GlobalSettings, game: &InstalledGame) -> Result<()> {
         self.launch_utility(settings, game, "regedit")
     }
 
-    /// Launch a Wine utility with proper environment settings
-    /// # Errors
-    /// Returns an error if the utility cannot be launched.
     fn launch_utility(&self, settings: &GlobalSettings, game: &InstalledGame, utility: &str) -> Result<()> {
-        // Resolve version
         let resolved_version = self.resolve_version(settings)?;
         
-        // Handle "system" wine version - use wine from PATH instead of components directory
         let wine_bin = if resolved_version == "system" {
             std::path::PathBuf::from(utility)
         } else {
@@ -84,7 +69,6 @@ impl Wine {
             .wineprefixes_directory
             .join(&game.biz_name);
 
-        // Ensure the wineprefix directory exists before running utilities
         std::fs::create_dir_all(&prefix_path)
             .with_context(|| format!("Failed to create wineprefix directory: {}", prefix_path.display()))?;
 
@@ -92,16 +76,13 @@ impl Wine {
             .to_string_lossy()
             .into_owned();
 
-        // Build the command
         let mut cmd = Command::new(&wine_bin);
 
         cmd.env("WINEPREFIX", &prefix)
             .env("WINEDEBUG", "");
 
-        // Setup DXVK DLL overrides if needed
         let mut dll_overrides = self.setup_dxvk(settings, game)?;
         
-        // Merge with existing WINEDLLOVERRIDES
         if let Some(existing) = game.environment.get("WINEDLLOVERRIDES") {
             dll_overrides.push(existing.clone());
         }
@@ -110,14 +91,12 @@ impl Wine {
             cmd.env("WINEDLLOVERRIDES", dll_overrides.join(";"));
         }
 
-        // Apply user environment variables from game settings
         for (key, value) in &game.environment {
             if key != "WINEDLLOVERRIDES" {
                 cmd.env(key, value);
             }
         }
 
-        // Handle Wayland
         if game.enable_winewayland {
             cmd.env("DISPLAY", "");
         }
@@ -133,16 +112,11 @@ impl Wine {
         Ok(())
     }
 
-    /// Resolve the Wine version to use
-    /// If version is empty, returns the latest installed version
-    /// # Errors
-    /// Returns an error if the wine directory cannot be read or if no Wine versions are installed.
     pub fn resolve_version(&self, settings: &GlobalSettings) -> Result<String> {
         if !self.version.is_empty() {
             return Ok(self.version.clone());
         }
 
-        // Version is empty, find installed versions and pick the latest one
         let base_dir = settings.components_directory.join("wine");
         
         let mut versions: Vec<String> = std::fs::read_dir(&base_dir)
@@ -158,12 +132,10 @@ impl Wine {
             .context("No Wine version installed. Please install Wine from settings.")
     }
 
-    /// Setup DXVK by copying DLLs to the Wine prefix
     #[allow(clippy::unused_self)]
     fn setup_dxvk(&self, settings: &GlobalSettings, game: &InstalledGame) -> Result<Vec<String>> {
         let dxvk_dir = settings.components_directory.join("dxvk");
         
-        // Find the DXVK version to use from runtime_components
         let dxvk_version = game.runtime_components.iter()
             .find_map(|component| {
                 if let RuntimeComponents::Dxvk(version) = component {
@@ -173,7 +145,6 @@ impl Wine {
                 }
             });
 
-        // Determine the DXVK path: use specified version or fall back to any available
         let dxvk_path = if let Some(ref version) = dxvk_version {
             println!("Using DXVK version: {version} (configured)");
             let version_path = dxvk_dir.join(version);
@@ -184,7 +155,6 @@ impl Wine {
             }
         } else {
             println!("Using DXVK version: auto (any available)");
-            // No version specified, find any DXVK version directory
             std::fs::read_dir(&dxvk_dir)
                 .ok()
                 .and_then(|entries| {
@@ -212,7 +182,6 @@ impl Wine {
         for dll_name in &dxvk_dlls {
             let dll_file = format!("{dll_name}.dll");
 
-            // Copy 64-bit DLL
             let src_x64 = dxvk_path.join("x64").join(&dll_file);
             let dst_x64 = system32.join(&dll_file);
             if src_x64.exists() {
@@ -220,7 +189,6 @@ impl Wine {
                     .with_context(|| format!("Failed to copy {dll_file} to system32"))?;
             }
 
-            // Copy 32-bit DLL
             let src_x32 = dxvk_path.join("x32").join(&dll_file);
             let dst_x32 = syswow64.join(&dll_file);
             if src_x32.exists() {
@@ -234,7 +202,6 @@ impl Wine {
         Ok(dll_overrides)
     }
 
-    /// Build the wine command with optional Jadeite injection
     #[allow(clippy::unused_self)]
     fn build_wine_command(
         &self,
@@ -250,17 +217,14 @@ impl Wine {
         if needs_jadeite {
             let jadeite_dir = settings.components_directory.join("jadeite");
             
-            // Look for Jadeite in version subdirectories first, then fall back to base directory
             let jade = std::fs::read_dir(&jadeite_dir)
                 .context("Failed to read jadeite directory")?
                 .filter_map(std::result::Result::ok)
                 .find(|entry| {
                     let path = entry.path();
-                    // Check if this is a version directory with jadeite.exe
                     path.is_dir() && path.join("jadeite.exe").exists()
                 })
                 .map(|entry| entry.path().join("jadeite.exe"))
-                // Fallback: check base directory
                 .or_else(|| {
                     let base_jade = jadeite_dir.join("jadeite.exe");
                     base_jade.exists().then_some(base_jade)
@@ -281,7 +245,6 @@ impl Wine {
             wine_args.extend(args.iter().cloned());
         }
 
-        // Add DirectX11 flag if enabled
         if game.use_directx11 {
             wine_args.push("-force-d3d11".to_string());
         }
@@ -289,7 +252,6 @@ impl Wine {
         Ok(wine_args)
     }
 
-    /// Apply command wrapper if specified
     fn apply_command_wrapper(
         wine_args: &[String],
         wrapper: Option<&String>,
@@ -311,8 +273,21 @@ impl Wine {
         }
     }
 
+    fn apply_gamemode(
+        program: String,
+        args: Vec<String>,
+        enable_gamemode: bool,
+    ) -> (String, Vec<String>) {
+        if enable_gamemode && which::which("gamemoderun").is_ok() {
+            let mut gamemode_args = vec![program];
+            gamemode_args.extend(args);
+            ("gamemoderun".to_string(), gamemode_args)
+        } else {
+            (program, args)
+        }
+    }
+
     fn run_game_internal(&self, settings: &GlobalSettings, game: &InstalledGame) -> Result<std::process::Child> {
-        // Resolve version (use first installed version if empty)
         let resolved_version = self.resolve_version(settings)?;
         
         println!("Using Wine version: {} (configured: {})", 
@@ -320,7 +295,6 @@ impl Wine {
             if self.version.is_empty() { "auto" } else { &self.version }
         );
         
-        // Handle "system" wine version - use wine from PATH instead of components directory
         let wine_bin = if resolved_version == "system" {
             std::path::PathBuf::from("wine")
         } else {
@@ -335,7 +309,6 @@ impl Wine {
             .to_string_lossy()
             .into_owned();
 
-        // Create log file path
         let log_path = settings.components_directory
             .parent()
             .unwrap_or(&settings.components_directory)
@@ -348,23 +321,23 @@ impl Wine {
             .open(&log_path)
             .context("Failed to create log file")?;
 
-        // Setup DXVK
         let mut dll_overrides = self.setup_dxvk(settings, game)?;
-
-        // Build wine command with optional Jadeite
         let wine_args = self.build_wine_command(settings, game, &wine_bin)?;
 
-        // Apply command wrapper if specified
-        let (final_program, final_args) =
+        let (mut final_program, mut final_args) =
             Self::apply_command_wrapper(&wine_args, game.command_wrapper.as_ref());
 
-        // Build the command
+        (final_program, final_args) = Self::apply_gamemode(
+            final_program,
+            final_args,
+            game.enable_gamemode,
+        );
+
         let mut cmd = Command::new(&final_program);
         cmd.args(&final_args);
 
         cmd.env("WINEPREFIX", &prefix).env("WINEDEBUG", "");
 
-        // Merge with existing WINEDLLOVERRIDES
         if let Some(existing) = game.environment.get("WINEDLLOVERRIDES") {
             dll_overrides.push(existing.clone());
         }
@@ -373,7 +346,6 @@ impl Wine {
             cmd.env("WINEDLLOVERRIDES", dll_overrides.join(";"));
         }
 
-        // Check if Jadeite is needed
         let manifest = TweakManifest::new();
         let needs_jadeite = manifest.needs_jadeite(&game.id);
         
@@ -381,30 +353,25 @@ impl Wine {
             cmd.env("JADEITE_ALLOW_UNKNOWN", "1");
         }
 
-        // Apply user environment variables
         for (key, value) in &game.environment {
             if key != "WINEDLLOVERRIDES" {
                 cmd.env(key, value);
             }
         }
 
-        // Apply game specific environmental variables
         let tweak_env_vars = manifest.get_environment_vars(&game.id);
         for (key, value) in &tweak_env_vars {
             cmd.env(key, value);
         }
 
-        // Handle Wayland
         if game.enable_winewayland {
             cmd.env("DISPLAY", "");
         }
 
-        // Handle MangoHud
         if game.enable_mangohud {
             cmd.env("MANGOHUD", "1");
         }
 
-        // Redirect stdout and stderr to log file
         cmd.stdout(log_file.try_clone()?);
         cmd.stderr(log_file);
 
@@ -413,7 +380,6 @@ impl Wine {
         );
         println!("Logging to: {}", log_path.display());
 
-        // If using Jadeite, we need to monitor the Wine prefix instead of the launcher PID
         if needs_jadeite {
             cmd.spawn()
                 .with_context(|| format!("Failed to launch game: wine={}, exe={}", 

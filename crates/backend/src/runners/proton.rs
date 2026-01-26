@@ -20,35 +20,21 @@ impl Runner for Proton {
 }
 
 impl Proton {
-    /// Kill a Proton process using wineserver
-    /// # Errors
-    /// Returns an error if wineserver cannot be executed.
     pub fn kill_proton_process(proton_path: &str, prefix_path: &str) -> Result<()> {
         let wineserver_path = std::path::Path::new(proton_path).join("files/bin/wineserver");
-        // Proton uses a /pfx subdirectory for the actual Wine prefix
         let actual_prefix = format!("{prefix_path}/pfx");
         kill_wineserver(&wineserver_path, &actual_prefix)
     }
 
-    /// Launch winecfg utility with proper environment settings
-    /// # Errors
-    /// Returns an error if winecfg cannot be launched.
     pub fn launch_winecfg(&self, settings: &GlobalSettings, game: &InstalledGame) -> Result<()> {
         self.launch_utility(settings, game, "winecfg")
     }
 
-    /// Launch regedit utility with proper environment settings
-    /// # Errors
-    /// Returns an error if regedit cannot be launched.
     pub fn launch_regedit(&self, settings: &GlobalSettings, game: &InstalledGame) -> Result<()> {
         self.launch_utility(settings, game, "regedit")
     }
 
-    /// Launch a Wine utility with proper environment settings
-    /// # Errors
-    /// Returns an error if the utility cannot be launched.
     fn launch_utility(&self, settings: &GlobalSettings, game: &InstalledGame, utility: &str) -> Result<()> {
-        // Resolve version
         let resolved_version = self.resolve_version(settings)?;
         
         let proton_path = settings.components_directory.join("proton").join(&resolved_version);
@@ -57,7 +43,6 @@ impl Proton {
             return Err(anyhow::anyhow!("Proton version {resolved_version} not found"));
         }
 
-        // Find UMU runtime and Steam Runtime
         let umu_run = Self::find_umu_runtime(settings)?;
         let steam_runtime = Self::find_steam_runtime(settings)?;
 
@@ -65,7 +50,6 @@ impl Proton {
             .wineprefixes_directory
             .join(&game.biz_name);
 
-        // Ensure the wineprefix directory exists before running utilities
         std::fs::create_dir_all(&prefix_path)
             .with_context(|| format!("Failed to create wineprefix directory: {}", prefix_path.display()))?;
 
@@ -73,7 +57,6 @@ impl Proton {
             .to_string_lossy()
             .into_owned();
 
-        // Build the command
         let mut cmd = Command::new(&umu_run);
         cmd.arg(utility);
 
@@ -82,12 +65,10 @@ impl Proton {
             .env("RUNTIMEPATH", &steam_runtime)
             .env("PROTONPATH", &proton_path);
 
-        // Apply user environment variables from game settings
         for (key, value) in &game.environment {
             cmd.env(key, value);
         }
 
-        // Handle Wayland
         if game.enable_winewayland {
             cmd.env("PROTON_ENABLE_WAYLAND", "1");
         }
@@ -105,16 +86,11 @@ impl Proton {
         Ok(())
     }
 
-    /// Resolve the Proton version to use
-    /// If version is empty, returns the latest installed version
-    /// # Errors
-    /// Returns an error if the proton directory cannot be read or if no Proton versions are installed.
     pub fn resolve_version(&self, settings: &GlobalSettings) -> Result<String> {
         if !self.version.is_empty() {
             return Ok(self.version.clone());
         }
 
-        // Version is empty, find installed versions and pick the latest one
         let base_dir = settings.components_directory.join("proton");
         
         let mut versions: Vec<String> = std::fs::read_dir(&base_dir)
@@ -130,7 +106,6 @@ impl Proton {
             .context("No Proton version installed. Please install Proton from settings.")
     }
 
-    /// Find the UMU runtime path
     fn find_umu_runtime(settings: &GlobalSettings) -> Result<std::path::PathBuf> {
         let umu_dir = settings.components_directory.join("umu");
         
@@ -145,7 +120,6 @@ impl Proton {
             .context("umu-run executable not found")
     }
 
-    /// Find the Steam Runtime path
     fn find_steam_runtime(settings: &GlobalSettings) -> Result<std::path::PathBuf> {
         let steamrt_dir = settings.components_directory.join("steamrt");
         
@@ -160,7 +134,6 @@ impl Proton {
             .context("SteamLinuxRuntime_sniper not found")
     }
 
-    /// Build the game command with optional Jadeite injection
     #[allow(clippy::unused_self)]
     fn build_game_command(
         &self,
@@ -203,7 +176,6 @@ impl Proton {
             args.extend(game_args.iter().cloned());
         }
 
-        // Add DirectX11 flag if enabled
         if game.use_directx11 {
             args.push("-force-d3d11".to_string());
         }
@@ -211,7 +183,6 @@ impl Proton {
         Ok(args)
     }
 
-    /// Apply command wrapper if specified
     fn apply_command_wrapper(
         args: &[String],
         wrapper: Option<&String>,
@@ -233,8 +204,21 @@ impl Proton {
         }
     }
 
+    fn apply_gamemode(
+        program: String,
+        args: Vec<String>,
+        enable_gamemode: bool,
+    ) -> (String, Vec<String>) {
+        if enable_gamemode && which::which("gamemoderun").is_ok() {
+            let mut gamemode_args = vec![program];
+            gamemode_args.extend(args);
+            ("gamemoderun".to_string(), gamemode_args)
+        } else {
+            (program, args)
+        }
+    }
+
     fn run_game_internal(&self, settings: &GlobalSettings, game: &InstalledGame) -> Result<std::process::Child> {
-        // Resolve version (use first installed version if empty)
         let resolved_version = self.resolve_version(settings)?;
         
         println!("Using Proton version: {} (configured: {})", 
@@ -251,7 +235,6 @@ impl Proton {
             .to_string_lossy()
             .into_owned();
 
-        // Create log file path
         let log_path = settings.components_directory
             .parent()
             .unwrap_or(&settings.components_directory)
@@ -264,22 +247,22 @@ impl Proton {
             .open(&log_path)
             .context("Failed to create log file")?;
 
-        // Find UMU and Steam Runtime
         let umu_run = Self::find_umu_runtime(settings)?;
         let steam_runtime = Self::find_steam_runtime(settings)?;
-
-        // Build game command with optional Jadeite
         let game_args = self.build_game_command(settings, game)?;
 
-        // Build umu-run command: umu-run <game_exe> <game_args>
         let mut umu_args = vec![umu_run.to_string_lossy().to_string()];
         umu_args.extend(game_args);
 
-        // Apply command wrapper if specified
-        let (final_program, final_args) =
+        let (mut final_program, mut final_args) =
             Self::apply_command_wrapper(&umu_args, game.command_wrapper.as_ref());
 
-        // Build the command
+        (final_program, final_args) = Self::apply_gamemode(
+            final_program,
+            final_args,
+            game.enable_gamemode,
+        );
+
         let mut cmd = Command::new(&final_program);
         cmd.args(&final_args);
 
@@ -288,34 +271,28 @@ impl Proton {
             .env("RUNTIMEPATH", &steam_runtime)
             .env("PROTONPATH", &proton_path);
 
-        // Check if Jadeite is needed
         let manifest = TweakManifest::new();
         if manifest.needs_jadeite(&game.id) {
             cmd.env("JADEITE_ALLOW_UNKNOWN", "1");
         }
 
-        // Apply user environment variables
         for (key, value) in &game.environment {
             cmd.env(key, value);
         }
 
-        // Apply game specific environmental variables
         let tweak_env_vars = manifest.get_environment_vars(&game.id);
         for (key, value) in &tweak_env_vars {
             cmd.env(key, value);
         }
 
-        // Handle Wayland
         if game.enable_winewayland {
             cmd.env("PROTON_ENABLE_WAYLAND", "1");
         }
 
-        // Handle MangoHud
         if game.enable_mangohud {
             cmd.env("MANGOHUD", "1");
         }
 
-        // Redirect stdout and stderr to log file
         cmd.stdout(log_file.try_clone()?);
         cmd.stderr(log_file);
 

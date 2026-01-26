@@ -1,4 +1,4 @@
-use crate::pages::settings_modal::components::{ToggleOption, check_command_exists};
+use crate::pages::settings_modal::components::ToggleOption;
 use crate::pages::settings_modal::styles::TEXT_SECONDARY;
 use freya::prelude::*;
 
@@ -10,7 +10,7 @@ pub fn LaunchOptionsPage(
     enable_mangohud: Signal<bool>,
     enable_gamemode: Signal<bool>,
 ) -> Element {
-    let gamemode_available = check_command_exists("gamemoderun");
+    let gamemode_available = which::which("gamemoderun").is_ok();
 
     rsx! {
         rect {
