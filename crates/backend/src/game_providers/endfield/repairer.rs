@@ -20,6 +20,58 @@ impl Repairer {
         Self { game, temp_dir }
     }
 
+    /// Process delete_files.txt if it exists
+    fn process_delete_files(&self) -> Result<(), String> {
+        let delete_file = self.game.path().join("delete_files.txt");
+
+        if !delete_file.exists() {
+            return Ok(());
+        }
+
+        eprintln!("[INFO] Processing delete_files.txt");
+
+        let content = std::fs::read_to_string(&delete_file)
+            .map_err(|e| format!("Failed to read delete_files.txt: {e}"))?;
+
+        let game_path = self.game.path().canonicalize()
+            .map_err(|e| format!("Failed to canonicalize game path: {e}"))?;
+
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+
+            let file_to_delete = self.game.path().join(line);
+
+            let resolved_path = match file_to_delete.canonicalize() {
+                Ok(p) => p,
+                Err(_) => {
+                    continue;
+                }
+            };
+
+            // Verify the resolved path is within game directory
+            if !resolved_path.starts_with(&game_path) {
+                eprintln!("[WARN] Skipping path outside game directory: {line}");
+                continue;
+            }
+
+            if let Err(e) = std::fs::remove_file(&resolved_path) {
+                eprintln!("[WARN] Failed to delete {line}: {e}");
+            } else {
+                eprintln!("[INFO] Deleted: {line}");
+            }
+        }
+
+
+        if let Err(e) = std::fs::remove_file(&delete_file) {
+            eprintln!("[WARN] Failed to remove delete_files.txt: {e}");
+        }
+        
+        Ok(())
+    }
+
     /// Update the game to the latest version
     /// Attempts to use patch update if available, falls back to full download
     /// # Errors
@@ -81,6 +133,8 @@ impl Repairer {
                                 APP_CODE,
                             )
                             .await?;
+
+                            self.process_delete_files()?;
 
                             // Write .version file
                             if let Some(version_str) = latest_version {
