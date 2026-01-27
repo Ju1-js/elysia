@@ -450,27 +450,36 @@ pub fn VideoBackgroundPlayer(video_url: String, on_ready: EventHandler<()>) -> E
             #[allow(clippy::cast_precision_loss)]
             let canvas_height = canvas_context.canvas.image_info().height() as f32;
 
+            // 16:9 is hardcoded as fallback for now, unless they change it
+            let (scaled_x, scaled_y, scaled_w, scaled_h) = get_scaled_dimens(16.0/9.0, canvas_width, canvas_height);
+
             if let Some(ref state) = state_option {
                 if let Ok(frame_guard) = state.shared_frame.try_lock() {
                     if let Some(ref frame) = *frame_guard {
                         if state.cancel_token.is_cancelled() {
-                            render_placeholder(canvas_context.canvas, canvas_width, canvas_height);
+                            render_placeholder(canvas_context.canvas, scaled_x, scaled_y, scaled_w, scaled_h);
                         } else {
+
+                            let aspect_ratio = frame.width as f32 / frame.height as f32;
+                            let (scaled_x, scaled_y, scaled_w, scaled_h) = get_scaled_dimens(aspect_ratio, canvas_width, canvas_height);
+
                             render_video_frame(
                                 canvas_context.canvas,
                                 frame,
-                                canvas_width,
-                                canvas_height,
+                                scaled_x,
+                                scaled_y,
+                                scaled_w,
+                                scaled_h
                             );
                         }
                     } else {
-                        render_placeholder(canvas_context.canvas, canvas_width, canvas_height);
+                        render_placeholder(canvas_context.canvas, scaled_x, scaled_y, scaled_w, scaled_h);
                     }
                 } else {
-                    render_placeholder(canvas_context.canvas, canvas_width, canvas_height);
+                    render_placeholder(canvas_context.canvas, scaled_x, scaled_y, scaled_w, scaled_h);
                 }
             } else {
-                render_placeholder(canvas_context.canvas, canvas_width, canvas_height);
+                render_placeholder(canvas_context.canvas, scaled_x, scaled_y, scaled_w, scaled_h);
             }
 
             canvas_context.canvas.restore();
@@ -488,7 +497,7 @@ pub fn VideoBackgroundPlayer(video_url: String, on_ready: EventHandler<()>) -> E
 }
 
 /// Render a video frame onto the canvas
-fn render_video_frame(canvas: &Canvas, frame: &VideoFrame, width: f32, height: f32) {
+fn render_video_frame(canvas: &Canvas, frame: &VideoFrame, x: f32, y: f32, width: f32, height: f32) {
     // Convert dimensions with saturation (video frames are unlikely to exceed i32::MAX)
     let width_i32 = i32::try_from(frame.width).unwrap_or_else(|_| {
         debug_error!("Video frame width {} exceeds i32::MAX, clamping", frame.width);
@@ -511,7 +520,7 @@ fn render_video_frame(canvas: &Canvas, frame: &VideoFrame, width: f32, height: f
     if let Some(image) =
         images::raster_from_data(&image_info, pixel_data, (frame.width * 4) as usize)
     {
-        let destination_rect = skia_safe::Rect::from_xywh(0.0, 0.0, width, height);
+        let destination_rect = skia_safe::Rect::from_xywh(x, y, width, height);
         let sampling_options = SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear);
         let mut paint = skia_safe::Paint::default();
         paint.set_anti_alias(true);
@@ -527,9 +536,29 @@ fn render_video_frame(canvas: &Canvas, frame: &VideoFrame, width: f32, height: f
 }
 
 /// Render a placeholder when no video frame is available
-fn render_placeholder(canvas: &Canvas, width: f32, height: f32) {
+fn render_placeholder(canvas: &Canvas, x: f32, y: f32, width: f32, height: f32) {
     let mut paint = skia_safe::Paint::default();
     paint.set_color(skia_safe::Color::from_rgb(20, 20, 20));
-    let rect = skia_safe::Rect::from_xywh(0.0, 0.0, width, height);
+    let rect = skia_safe::Rect::from_xywh(x, y, width, height);
     canvas.draw_rect(rect, &paint);
+}
+
+/// Calculate scaled dimensions for image
+fn get_scaled_dimens(ratio: f32, width: f32, height: f32) -> (f32, f32, f32, f32) {
+    let container_ratio = width / height;
+
+    let new_width: f32;
+    let new_height: f32;
+    if container_ratio > ratio {
+        new_width = width;
+        new_height = new_width / ratio;
+    } else {
+        new_height = height;
+        new_width = new_height * ratio;
+    }
+
+    let canvas_x = (width - new_width) / 2.0;
+    let canvas_y = (height - new_height) / 2.0;
+
+    (canvas_x, canvas_y, new_width, new_height)
 }

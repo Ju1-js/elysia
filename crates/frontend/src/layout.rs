@@ -322,10 +322,13 @@ fn AppLayout() -> Element {
                         shadow: "4 0 12 0 rgb(0, 0, 0, 50)",
                         layer: "-10",
                         backdrop_blur: "16",
+                        content: "flex",
+                        
                         ScrollView {
                             padding: "16",
                             spacing: "12",
-                            height: "80%",
+                            direction: "vertical",
+                            height: "flex(1)",
                             if let Some(ctx) = &ctx_option {
                                 for link in make_links(&ctx.api_games, selected_game_id, navigator) {
                                     {link}
@@ -336,15 +339,16 @@ fn AppLayout() -> Element {
                                 }
                             }
                         }
+
                         rect {
-                            height: "20%",
+                            height: "auto",
                             width: "100%",
                             direction: "vertical",
                             main_align: "center",
                             cross_align: "center",
                             spacing: "20",
                             padding: "14",
-
+                        
                             rect {
                                 key: "settings",
                                 onclick: move |_| {

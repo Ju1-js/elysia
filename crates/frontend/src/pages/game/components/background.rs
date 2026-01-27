@@ -273,13 +273,15 @@ pub fn BackgroundLayers(
             position_left: "0",
             width: "100%",
             height: "100%",
-            cross_align: "start",
-            main_align: "start",
+            cross_align: "center",
+            main_align: "center",
             layer: "5",
             opacity: "{1.0 - video_layer_opacity}",
             MyNetworkImage {
                 url: static_bg_url.clone(),
                 sampling: "trilinear",
+                aspect_ratio: "max",
+                cover: "center"
             }
         }
 
@@ -289,14 +291,16 @@ pub fn BackgroundLayers(
             position_left: "20",
             width: "100%",
             height: "100%",
-            cross_align: "end",
-            main_align: "end",
+            cross_align: "center",
+            main_align: "center",
             layer: "4",
             offset_x: "-20",
             opacity: "{1.0 - video_layer_opacity}",
             MyNetworkImage {
                 url: static_bg_url,
                 sampling: "trilinear",
+                aspect_ratio: "max",
+                cover: "center"
             }
         }
 
@@ -306,14 +310,16 @@ pub fn BackgroundLayers(
             position_left: "20",
             width: "100%",
             height: "100%",
-            cross_align: "end",
-            main_align: "end",
+            cross_align: "center",
+            main_align: "center",
             layer: "3",
             opacity: "{(1.0 - crossfade.fade_progress) * (1.0 - video_layer_opacity)}",
             offset_x: "-20",
             MyNetworkImage {
                 url: crossfade.prev_url,
                 sampling: "trilinear",
+                aspect_ratio: "max",
+                cover: "center"
             }
         }
 
@@ -321,8 +327,8 @@ pub fn BackgroundLayers(
             position: "absolute",
             position_top: "0",
             position_left: "20",
-            cross_align: "end",
-            main_align: "end",
+            cross_align: "center",
+            main_align: "center",
             width: "100%",
             height: "100%",
             layer: "3",
@@ -331,6 +337,8 @@ pub fn BackgroundLayers(
             MyNetworkImage {
                 url: crossfade.curr_url,
                 sampling: "trilinear",
+                aspect_ratio: "max",
+                cover: "center"
             }
         }
 
@@ -403,28 +411,45 @@ pub fn BackgroundLayers(
                         url: prev_theme_parsed,
                         sampling: "trilinear",
                     }
-                }
+                }     
             }
         }
 
+        // Split handling for HoYo vs AKE "theme" image
+        // Unless someone wants to resize the AKE image to be as HoYo
         if let Some(theme) = theme_url {
             if let Ok(theme_parsed) = theme.parse::<Url>() {
-                rect {
-                    position: "absolute",
-                    position_top: "{theme_position_top}",
-                    position_left: "{theme_position_left}",
-                    width: "{theme_width}",
-                    height: "{theme_height}",
-                    main_align: "{theme_main_align}",
-                    cross_align: "{theme_cross_align}",
-                    layer: "1",
-                    offset_x: "{theme_offset_base + (30.0 * (1.0 - theme_fade_progress))}",
-                    opacity: "{theme_fade_progress}",
-                    MyNetworkImage {
-                        url: theme_parsed,
-                        sampling: "trilinear",
+                if is_endfield {
+                    rect {
+                        position: "absolute",
+                        position_top: "{theme_position_top}",
+                        position_left: "{theme_position_left}",
+                        width: "{theme_width}",
+                        height: "{theme_height}",
+                        main_align: "{theme_main_align}",
+                        cross_align: "{theme_cross_align}",
+                        layer: "1",
+                        offset_x: "{theme_offset_base + (30.0 * (1.0 - theme_fade_progress))}",
+                        opacity: "{theme_fade_progress}",
+                        MyNetworkImage {
+                            url: theme_parsed,
+                            sampling: "trilinear",
+                        }
+                    }
+                } else {
+                    rect {
+                        layer: "1",
+                        offset_x: "{theme_offset_base + (30.0 * (1.0 - theme_fade_progress))}",
+                        opacity: "{theme_fade_progress}",
+                        MyNetworkImage {
+                            url: theme_parsed,
+                            sampling: "trilinear",
+                            aspect_ratio: "max",
+                            cover: "center"
+                        }
                     }
                 }
+                
             }
         }
     }
