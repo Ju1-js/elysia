@@ -138,7 +138,7 @@ fn make_links(
                     width: "100%",
                     main_align: "center",
                     cross_align: "center",
-                    onclick: move |_| {
+                    onpointerpress: move |_| {
                         selected_game_id_mut.write().replace(game_id.clone());
                         navigator.push(Route::Game);
                     },
@@ -351,7 +351,7 @@ fn AppLayout() -> Element {
                         
                             rect {
                                 key: "settings",
-                                onclick: move |_| {
+                                onpointerpress: move |_| {
                                     navigator.push(Route::Settings);
                                 },
                                 MySidebarItem {
@@ -366,7 +366,7 @@ fn AppLayout() -> Element {
                             }
 
                             rect {
-                                onclick: move |_| {
+                                onpointerpress: move |_| {
                                     show_elysia_modal.set(true);
                                     elysia_scale_anim.start();
                                 },

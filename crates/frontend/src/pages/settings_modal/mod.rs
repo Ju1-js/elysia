@@ -321,7 +321,7 @@ pub fn SettingsModal(
             background: "rgb(0, 0, 0, 0.3)",
             backdrop_blur: "8",
             padding: "32",
-            onclick: {
+            onpointerpress: {
                 let save_settings = save_settings.clone();
                 move |_| {
                     save_settings();
@@ -334,7 +334,7 @@ pub fn SettingsModal(
                 height: "fill",
                 direction: "horizontal",
                 spacing: "16",
-                onclick: move |e| {
+                onpointerpress: move |e| {
                     e.stop_propagation();
                 },
                 rotate: "0deg",

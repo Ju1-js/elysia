@@ -50,7 +50,7 @@ pub fn RunnerToggleButton(
             cross_align: "center",
             border: "{border}",
             shadow: "{shadow}",
-            onclick: {
+            onpointerpress: {
                 to_owned![runner_type];
                 move |_| on_select.call(runner_type.clone())
             },

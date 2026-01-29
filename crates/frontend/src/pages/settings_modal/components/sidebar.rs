@@ -46,7 +46,7 @@ pub fn SidebarOption(
             border: "1.5 solid {border_color}",
             main_align: "start",
             cross_align: "center",
-            onclick: {
+            onpointerpress: {
                 to_owned![page];
                 move |_| on_select.call(page.clone())
             },

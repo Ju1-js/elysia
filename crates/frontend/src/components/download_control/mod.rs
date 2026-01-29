@@ -467,7 +467,7 @@ fn ActionButton(
                         border: "1 inner rgb(255, 255, 255, 0.15)",
                         shadow: "0 2 8 0 rgb(0, 0, 0, 0.5)",
                         backdrop_blur: "12",
-                        onclick: move |_| {
+                        onpointerpress: move |_| {
                             if let Some(handler) = on_show_import_modal {
                                 handler.call(());
                             }
@@ -751,7 +751,7 @@ pub fn InstallDirectoryModal(
             backdrop_blur: "8",
             main_align: "center",
             cross_align: "center",
-            onclick: move |_| on_close.call(()),
+            onpointerpress: move |_| on_close.call(()),
 
             // Modal content
             rect {
@@ -764,7 +764,7 @@ pub fn InstallDirectoryModal(
                 direction: "vertical",
                 spacing: "24",
                 shadow: "0 8 32 0 rgb(0, 0, 0, 0.5)",
-                onclick: move |e| {
+                onpointerpress: move |e| {
                     e.stop_propagation();
                 },
 
@@ -994,7 +994,7 @@ pub fn ImportGameModal(
             main_align: "center",
             cross_align: "center",
             layer: "-3",
-            onclick: move |_| on_close.call(()),
+            onpointerpress: move |_| on_close.call(()),
 
             // Modal content
             rect {
@@ -1007,7 +1007,7 @@ pub fn ImportGameModal(
                 direction: "vertical",
                 spacing: "24",
                 shadow: "0 8 32 0 rgb(0, 0, 0, 0.5)",
-                onclick: move |e| {
+                onpointerpress: move |e| {
                     e.stop_propagation();
                 },
 
@@ -1218,7 +1218,7 @@ fn DirectX11Checkbox(
                 border: "1 inner rgb(255, 255, 255, 0.1)",
                 shadow: "0 1 4 0 rgb(0, 0, 0, 0.3)",
                 backdrop_blur: "8",
-                onclick: on_toggle,
+                onpointerpress: on_toggle,
 
                 // Checkbox
                 rect {

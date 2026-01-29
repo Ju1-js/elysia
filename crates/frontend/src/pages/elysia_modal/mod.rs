@@ -48,7 +48,7 @@ pub fn ElysiaModal(on_close: EventHandler<()>, scale: f64) -> Element {
             height: "100%",
             main_align: "center",
             cross_align: "center",
-            onclick: move |_| on_close.call(()),
+            onpointerpress: move |_| on_close.call(()),
 
             // Modal content
             rect {
@@ -63,7 +63,7 @@ pub fn ElysiaModal(on_close: EventHandler<()>, scale: f64) -> Element {
                 spacing: "24",
                 shadow: "0 8 32 0 rgb(0, 0, 0, 0.5)",
                 scale: "{scale}",
-                onclick: move |e| {
+                onpointerpress: move |e| {
                     e.stop_propagation();
                 },
 
@@ -78,7 +78,7 @@ pub fn ElysiaModal(on_close: EventHandler<()>, scale: f64) -> Element {
                     main_align: "center",
                     cross_align: "center",
                     background: "rgb(50, 50, 55)",
-                    onclick: move |_| on_close.call(()),
+                    onpointerpress: move |_| on_close.call(()),
                     svg {
                         width: "16",
                         height: "16",

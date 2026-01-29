@@ -47,7 +47,7 @@ pub fn StylizedDropdown(
                 direction: "horizontal",
                 main_align: "space-between",
                 cross_align: "center",
-                onclick: move |e| {
+                onpointerpress: move |e| {
                     e.stop_propagation();
                     is_open.set(!is_open());
                 },
@@ -80,7 +80,7 @@ pub fn StylizedDropdown(
                     corner_radius: "10",
                     border: "1.5 solid {INTERACTIVE_BORDER}",
                     shadow: "0 4 16 0 rgb(0, 0, 0, 0.3)",
-                    onclick: move |e| {
+                    onpointerpress: move |e| {
                         e.stop_propagation();
                     },
 
@@ -141,7 +141,7 @@ fn StylizedDropdownOption(
             backdrop_blur: "12",
             corner_radius: "8",
             border: "1.5 solid {border_color}",
-            onclick: {
+            onpointerpress: {
                 to_owned![internal_name];
                 move |_| {
                     on_select.call(internal_name.clone());

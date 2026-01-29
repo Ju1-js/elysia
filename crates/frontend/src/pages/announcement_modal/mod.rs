@@ -11,7 +11,7 @@ pub fn AnnouncementModal(on_close: EventHandler<()>, scale: f64, message: String
             height: "100%",
             main_align: "center",
             cross_align: "center",
-            onclick: move |_| {
+            onpointerpress: move |_| {
                 if can_close {
                     on_close.call(());
                 }
@@ -31,7 +31,7 @@ pub fn AnnouncementModal(on_close: EventHandler<()>, scale: f64, message: String
                 spacing: "24",
                 shadow: "0 8 32 0 rgb(0, 0, 0, 0.5)",
                 scale: "{scale}",
-                onclick: move |e| {
+                onpointerpress: move |e| {
                     e.stop_propagation();
                 },
 
@@ -46,7 +46,7 @@ pub fn AnnouncementModal(on_close: EventHandler<()>, scale: f64, message: String
                     main_align: "center",
                     cross_align: "center",
                     background: if can_close { "rgb(50, 50, 55)" } else { "rgb(40, 40, 45, 0.5)" },
-                    onclick: move |_| {
+                    onpointerpress: move |_| {
                         if can_close {
                             on_close.call(());
                         }
