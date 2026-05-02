@@ -45,13 +45,13 @@ jobs:
           sha512sum elysia.flatpak > elysia.flatpak.sha512sum
 
       - name: Upload artifact elysia.flatpak
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: elysia.flatpak
           path: ./flatpak/elysia.flatpak
 
       - name: Upload artifact elysia.flatpak.sha512sum
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: elysia.flatpak.sha512sum
           path: ./flatpak/elysia.flatpak.sha512sum
