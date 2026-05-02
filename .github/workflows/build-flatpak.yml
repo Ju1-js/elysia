@@ -6,7 +6,7 @@ on:
 jobs:
   build-flatpak:
     name: Build Flatpak Bundle
-    runs-on: trixie
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
