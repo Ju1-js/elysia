@@ -19,14 +19,14 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          apt-get update
-          apt-get remove -y needrestart || true
-          apt-get install -y git flatpak flatpak-builder python3 python3-pip wget sudo python3-aiohttp python3-tomlkit python3-yaml
-          flatpak remote-add --system --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          flatpak install --system -y flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
-          flatpak install --system -y flathub org.freedesktop.Platform.codecs-extra//25.08-extra
-          flatpak install --system -y flathub org.freedesktop.Sdk.Extension.rust-nightly//25.08
-          flatpak install --system -y flathub org.freedesktop.Sdk.Extension.llvm21//25.08
+          sudo apt-get update
+          sudo apt-get remove -y needrestart || true
+          sudo apt-get install -y git flatpak flatpak-builder python3 python3-pip wget python3-aiohttp python3-tomlkit python3-yaml
+          sudo flatpak remote-add --system --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install --system -y flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
+          sudo flatpak install --system -y flathub org.freedesktop.Platform.codecs-extra//25.08-extra
+          sudo flatpak install --system -y flathub org.freedesktop.Sdk.Extension.rust-nightly//25.08
+          sudo flatpak install --system -y flathub org.freedesktop.Sdk.Extension.llvm21//25.08
 
       - name: Generate cargo sources
         working-directory: ./flatpak
@@ -45,13 +45,13 @@ jobs:
           sha512sum elysia.flatpak > elysia.flatpak.sha512sum
 
       - name: Upload artifact elysia.flatpak
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: elysia.flatpak
           path: ./flatpak/elysia.flatpak
 
       - name: Upload artifact elysia.flatpak.sha512sum
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: elysia.flatpak.sha512sum
           path: ./flatpak/elysia.flatpak.sha512sum
